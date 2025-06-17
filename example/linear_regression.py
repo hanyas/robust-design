@@ -11,8 +11,8 @@ where xi is the design (input), and x is the observed output.
 import jax
 from jax import Array, random, numpy as jnp, scipy as jsc
 
-from robust_design.location.base import Prior, Model
-from robust_design.location.utils import info_gain
+from rdesign.base import Prior, Model
+from rdesign.utils import info_gain
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
