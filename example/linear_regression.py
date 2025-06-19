@@ -47,8 +47,7 @@ class LinearGaussianModel(Model):
         return theta[0] + theta[1] * design
 
     def _compute_stddev(self, design: Array, theta: Array):
-        noise_std = 1e-1 * design**2 + 1e-2 * (theta[0] + theta[1] * design)**2
-        return self.noise_std + noise_std
+        return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)**2
 
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
         """
@@ -89,7 +88,10 @@ if __name__ == "__main__":
     # jax.config.update("jax_disable_jit", True)
 
     prior_mean = jnp.array([0., 1.])
-    prior_cov = jnp.array([[2.0, 0.75], [0.75, 1.0]])
+    prior_cov = jnp.array([
+        [2.0, 0.75],
+        [0.75, 1.0]
+    ])
 
     key = random.PRNGKey(0)
     prior, model = create_regression_experiment(
