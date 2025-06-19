@@ -5,11 +5,12 @@ A generic implementation for Bayesian linear regression with a 2D parameter vect
 The experiment uses a Gaussian prior over the regression parameters and a Gaussian likelihood
 with linear structure in the parameters. The model is:
     theta ~ N(mu, Sigma)
-    x | theta, xi ~ N(theta_0 + theta_1 * xi, sigma^2)
+    x | theta, xi ~ N(theta_0 + theta_1 * xi, sigma^2(xi, theta))
 where xi is the design (input), and x is the observed output.
 """
 import jax
-from jax import Array, random, numpy as jnp, scipy as jsc
+from jax import Array, random, numpy as jnp
+from jax.scipy import stats
 
 from rdesign.base import Prior, Model
 from rdesign.utils import info_gain
@@ -34,10 +35,6 @@ class GaussianPrior(Prior):
         """Sample theta from multivariate Gaussian."""
         return random.multivariate_normal(key, self.mean, self.covar, shape=(num_samples,))
 
-    def logpdf(self, x: Array) -> Array:
-        """Compute log probability density for theta (x)."""
-        return jsc.stats.multivariate_normal.logpdf(x, self.mean, self.covar)
-
 
 class LinearGaussianModel(Model):
     """
@@ -46,27 +43,34 @@ class LinearGaussianModel(Model):
     def __init__(self, noise_std: Array):
         self.noise_std = noise_std
 
+    def _compute_mean(self, design: Array, theta: Array):
+        return theta[0] + theta[1] * design
+
+    def _compute_stddev(self, design: Array, theta: Array):
+        noise_std = 1e-1 * design**2 + 1e-2 * (theta[0] + theta[1] * design)**2
+        return self.noise_std + noise_std
+
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
         """
         Sample from the likelihood.
         Args:
             key: JAX PRNGKey
-            design: shape (N,) or (N, 1)
-            theta: shape (2,) or (N, 2)
+            design: shape (N, 2)
+            theta: shape (2,)
         Returns:
             x: shape (N,)
         """
-        mean = theta[0] + theta[1] * design
-        noise = random.normal(key, shape=mean.shape) * self.noise_std
-        return mean + noise
+        mean = jax.vmap(self._compute_mean, in_axes=(0, None))(design, theta)
+        stddev = jax.vmap(self._compute_stddev, in_axes=(0, None))(design, theta)
+        return random.multivariate_normal(key, mean=mean, cov=jnp.diag(stddev**2))
 
     def logpdf(self, x: Array, design: Array, theta: Array) -> Array:
         """
         Log likelihood of x given design and theta.
         """
-        mean = theta[0] + theta[1] * design
-        log_probs = jsc.stats.norm.logpdf(x, loc=mean, scale=self.noise_std)
-        return jnp.sum(log_probs)
+        mean = jax.vmap(self._compute_mean, in_axes=(0, None))(design, theta)
+        stddev = jax.vmap(self._compute_stddev, in_axes=(0, None))(design, theta)
+        return stats.multivariate_normal.logpdf(x, mean=mean, cov=jnp.diag(stddev**2))
 
 
 def create_regression_experiment(
@@ -82,9 +86,15 @@ def create_regression_experiment(
 # Example usage
 if __name__ == "__main__":
     jax.config.update("jax_enable_x64", True)
+    # jax.config.update("jax_disable_jit", True)
+
+    prior_mean = jnp.array([0., 1.])
+    prior_cov = jnp.array([[2.0, 0.75], [0.75, 1.0]])
 
     key = random.PRNGKey(0)
     prior, model = create_regression_experiment(
+        prior_mean=prior_mean,
+        prior_cov=prior_cov,
         noise_std=jnp.sqrt(1e-1)
     )
 
@@ -106,7 +116,7 @@ if __name__ == "__main__":
         for j in range(n_grid):
             for k in range(n_grid):
                 key, sub_key = random.split(key)
-                design = jnp.array([X[j, k], Y[j, k]]).reshape(2, 1)
+                design = jnp.array([X[j, k], Y[j, k]])
                 info_gain_vals = info_gain_vals.at[i, j, k].set(
                     info_gain(
                         key=sub_key,
@@ -141,7 +151,7 @@ if __name__ == "__main__":
     fig = plt.figure(figsize=(15, 12))
     axes = []
     for i in range(len(alphas)):
-        ax = fig.add_subplot(3, 2, i + 1, projection='3d')
+        ax = fig.add_subplot(1, 2, i + 1, projection='3d')
         axes.append(ax)
 
     for i, (alpha, ax) in enumerate(zip(alphas, axes)):
