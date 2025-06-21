@@ -15,10 +15,6 @@ from jax.scipy import stats
 from rdesign.base import Prior, Model
 from rdesign.utils import info_gain
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-mpl.use("Qt5Agg")
-
 
 class GaussianPrior(Prior):
     """Gaussian prior over 2D parameter vector theta."""
@@ -47,7 +43,7 @@ class LinearGaussianModel(Model):
         return theta[0] + theta[1] * design
 
     def _compute_stddev(self, design: Array, theta: Array):
-        return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)**2
+        return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)
 
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
         """
@@ -86,6 +82,36 @@ def create_regression_experiment(
 if __name__ == "__main__":
     jax.config.update("jax_enable_x64", True)
     # jax.config.update("jax_disable_jit", True)
+
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    mpl.use("Qt5Agg")
+
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+        "text.latex.preamble": r"\usepackage{amsmath} \usepackage{amssymb}",
+        "axes.unicode_minus": False,
+        # Font sizes
+        "font.size": 12,
+        "axes.labelsize": 14,
+        "axes.titlesize": 16,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+        "figure.titlesize": 18,
+        # Line and marker sizes
+        "lines.linewidth": 2,
+        "lines.markersize": 8,
+        "axes.linewidth": 1.5,
+        "xtick.major.width": 1.5,
+        "ytick.major.width": 1.5,
+        "xtick.major.size": 6,
+        "ytick.major.size": 6,
+        # Figure size for better visibility
+        "figure.figsize": (12, 8)
+    })
 
     prior_mean = jnp.array([0., 1.])
     prior_cov = jnp.array([
@@ -148,24 +174,25 @@ if __name__ == "__main__":
         ax.set_ylabel('Design 2')
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig('linear_regression_with_noise.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
 
-    fig = plt.figure(figsize=(15, 12))
-    axes = []
-    for i in range(len(alphas)):
-        ax = fig.add_subplot(1, 2, i + 1, projection='3d')
-        axes.append(ax)
-
-    for i, (alpha, ax) in enumerate(zip(alphas, axes)):
-        surf = ax.plot_surface(
-            X, Y, info_gain_vals[i],
-            cmap='viridis',
-            edgecolor='none',
-            alpha=0.8
-        )
-        ax.set_xlabel('Design 1')
-        ax.set_ylabel('Design 2')
-        ax.set_title(f'alpha = {alpha:.2f}')
-
-    plt.tight_layout()
-    plt.show()
+    # fig = plt.figure(figsize=(15, 12))
+    # axes = []
+    # for i in range(len(alphas)):
+    #     ax = fig.add_subplot(1, 2, i + 1, projection='3d')
+    #     axes.append(ax)
+    #
+    # for i, (alpha, ax) in enumerate(zip(alphas, axes)):
+    #     surf = ax.plot_surface(
+    #         X, Y, info_gain_vals[i],
+    #         cmap='viridis',
+    #         edgecolor='none',
+    #         alpha=0.8
+    #     )
+    #     ax.set_xlabel('Design 1')
+    #     ax.set_ylabel('Design 2')
+    #     ax.set_title(f'alpha = {alpha:.2f}')
+    #
+    # plt.tight_layout()
+    # plt.show()

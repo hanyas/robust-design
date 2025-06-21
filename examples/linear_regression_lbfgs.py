@@ -5,8 +5,6 @@ import jax.numpy as jnp
 
 from jaxopt import LBFGSB
 
-jax.config.update("jax_enable_x64", True)
-
 
 @jax.jit
 def sibsons_estimator(design, prior_cov, lklhd_cov, order):
@@ -70,12 +68,12 @@ def optimize_sibson(dim, prior_cov, lklhd_cov, order):
     optimizer = LBFGSB(
         fun=objective,
         maxiter=1000,
-        jit=False,  # We're already using JIT on the objective
+        jit=False,
         linesearch="zoom",
         linesearch_init="increase",
-        maxls=10,  # Increase maximum line search iterations
-        decrease_factor=0.5,  # More lenient decrease factor
-        increase_factor=1.5,  # More aggressive increase factor
+        maxls=10,  # maximum line search iterations
+        decrease_factor=0.5,
+        increase_factor=1.5,
         max_stepsize=1.0,  # Maximum step size
         min_stepsize=1e-3,  # Minimum step size
         tol=1e-4  # Tolerance for convergence
@@ -94,9 +92,37 @@ def optimize_sibson(dim, prior_cov, lklhd_cov, order):
 
 
 if __name__ == "__main__":
+    jax.config.update("jax_enable_x64", True)
+
     import matplotlib as mpl
     import matplotlib.pyplot as plt
     mpl.use("Qt5Agg")
+
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+        "text.latex.preamble": r"\usepackage{amsmath} \usepackage{amssymb}",
+        "axes.unicode_minus": False,
+        # Font sizes
+        "font.size": 12,
+        "axes.labelsize": 14,
+        "axes.titlesize": 16,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+        "figure.titlesize": 18,
+        # Line and marker sizes
+        "lines.linewidth": 2,
+        "lines.markersize": 8,
+        "axes.linewidth": 1.5,
+        "xtick.major.width": 1.5,
+        "ytick.major.width": 1.5,
+        "xtick.major.size": 6,
+        "ytick.major.size": 6,
+        # Figure size for better visibility
+        "figure.figsize": (12, 8)
+    })
 
     # Example usage
     dim = 2  # Number of design points
@@ -109,16 +135,16 @@ if __name__ == "__main__":
     X, Y = np.meshgrid(x, y)
 
     # Plot for different alpha values
-    alphas = [1e-12, 1e-2, 1e-1, 0.25, 0.5, 0.999, 3., 10.]
+    alphas = [1e-2, 1e-1, 0.5, 0.99]
 
     fig = plt.figure(figsize=(15, 10))
     for idx, alpha in enumerate(alphas):
         # Compute objective values
-        Z = np.zeros_like(X)
+        info_gain = np.zeros_like(X)
         for i in range(len(x)):
             for j in range(len(y)):
                 design = jnp.array([X[i, j], Y[i, j]])
-                Z[i, j] = -1.0 * objective(
+                info_gain[i, j] = -1.0 * objective(
                     design,
                     prior_cov,
                     lklhd_cov,
@@ -126,17 +152,24 @@ if __name__ == "__main__":
                 )
 
         # Create subplot
-        ax = fig.add_subplot(3, 3, idx + 1, projection='3d')
-        surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.8)
+        # ax = fig.add_subplot(2, 2, idx + 1, projection='3d')
+        # surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.8)
 
-        # Add contour lines
-        contour = ax.contour(X, Y, Z, levels=10, colors='k', alpha=0.5)
+        ax = fig.add_subplot(2, 2, idx + 1)
+        im = ax.imshow(
+            info_gain,
+            origin='lower',
+            extent=[-1.0, 1.0, -1.0, 1.0],
+            cmap='viridis',
+            alpha=0.8
+        )
 
-        ax.set_xlabel('xi_1')
-        ax.set_ylabel('xi_2')
+        ax.set_xlabel('Design 1')
+        ax.set_ylabel('Design 2')
         ax.set_title(f'alpha = {alpha}')
 
     plt.tight_layout()
+    # plt.savefig('linear_regression.pdf', dpi=300, bbox_inches='tight')
     plt.show()
 
     # # Run optimization for one alpha value

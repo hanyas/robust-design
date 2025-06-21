@@ -16,14 +16,10 @@ where:
 """
 import jax
 from jax import Array, random, numpy as jnp
-from jax.scipy import stats, special
+from jax.scipy import stats
 
 from rdesign.base import Prior, Model
 from rdesign.utils import info_gain
-
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-mpl.use("Qt5Agg")
 
 
 class UniformPrior(Prior):
@@ -356,6 +352,36 @@ if __name__ == "__main__":
     jax.config.update("jax_enable_x64", True)
     # jax.config.update("jax_disable_jit", True)
 
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    mpl.use("Qt5Agg")
+
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+        "text.latex.preamble": r"\usepackage{amsmath} \usepackage{amssymb}",
+        "axes.unicode_minus": False,
+        # Font sizes
+        "font.size": 12,
+        "axes.labelsize": 14,
+        "axes.titlesize": 16,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+        "figure.titlesize": 18,
+        # Line and marker sizes
+        "lines.linewidth": 2,
+        "lines.markersize": 8,
+        "axes.linewidth": 1.5,
+        "xtick.major.width": 1.5,
+        "ytick.major.width": 1.5,
+        "xtick.major.size": 6,
+        "ytick.major.size": 6,
+        # Figure size for better visibility
+        "figure.figsize": (12, 8)
+    })
+
     #  Example with 1D grid, 2 sources, 2 sensors, Gaussian mixture prior
     key = random.PRNGKey(0)
 
@@ -430,7 +456,8 @@ if __name__ == "__main__":
         ax.set_title(f'alpha = {alpha:.2f}')
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig('location_finding.pdf', dpi=300, bbox_inches='tight')
+    # plt.show()
 
     fig = plt.figure(figsize=(15, 12))
     axes = []
