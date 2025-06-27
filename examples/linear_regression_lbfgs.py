@@ -135,7 +135,8 @@ if __name__ == "__main__":
     X, Y = np.meshgrid(x, y)
 
     # Plot for different alpha values
-    alphas = [1e-2, 1e-1, 0.5, 0.99]
+    # alphas = [1e-2, 1e-1, 0.5, 0.99]
+    alphas = [1e-1, 0.99, 1.25, 2.5]
 
     fig = plt.figure(figsize=(15, 10))
     for idx, alpha in enumerate(alphas):
@@ -152,17 +153,17 @@ if __name__ == "__main__":
                 )
 
         # Create subplot
-        # ax = fig.add_subplot(2, 2, idx + 1, projection='3d')
-        # surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.8)
+        ax = fig.add_subplot(2, 2, idx + 1, projection='3d')
+        surf = ax.plot_surface(X, Y, info_gain, cmap='viridis', alpha=0.8)
 
-        ax = fig.add_subplot(2, 2, idx + 1)
-        im = ax.imshow(
-            info_gain,
-            origin='lower',
-            extent=[-1.0, 1.0, -1.0, 1.0],
-            cmap='viridis',
-            alpha=0.8
-        )
+        # ax = fig.add_subplot(2, 2, idx + 1)
+        # im = ax.imshow(
+        #     info_gain,
+        #     origin='lower',
+        #     extent=[-1.0, 1.0, -1.0, 1.0],
+        #     cmap='viridis',
+        #     alpha=0.8
+        # )
 
         ax.set_xlabel('Design 1')
         ax.set_ylabel('Design 2')
