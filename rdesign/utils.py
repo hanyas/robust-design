@@ -8,7 +8,7 @@ from .base import Prior, Model
 
 
 @partial(jax.jit, static_argnums=(2, 3, 4, 5))
-def info_gain(
+def robust_info_gain(
     key: Array,
     design: Array,
     prior: Prior,

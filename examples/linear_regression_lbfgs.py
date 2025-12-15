@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     import matplotlib as mpl
     import matplotlib.pyplot as plt
-    mpl.use("Qt5Agg")
+    # mpl.use("Qt5Agg")
 
     plt.rcParams.update({
         "text.usetex": True,
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     })
 
     # Example usage
-    dim = 2  # Number of design points
+    dim = 5  # Number of design points
     prior_cov = 1. * jnp.eye(2)  # Prior covariance
     lklhd_cov = 1e-1 * jnp.eye(1)  # Likelihood covariance
 
@@ -135,8 +135,7 @@ if __name__ == "__main__":
     X, Y = np.meshgrid(x, y)
 
     # Plot for different alpha values
-    # alphas = [1e-2, 1e-1, 0.5, 0.99]
-    alphas = [1e-1, 0.99, 1.25, 2.5]
+    alphas = [1e-2, 1e-1, 0.5, 0.99]
 
     fig = plt.figure(figsize=(15, 10))
     for idx, alpha in enumerate(alphas):

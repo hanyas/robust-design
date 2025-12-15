@@ -13,7 +13,7 @@ from jax import Array, random, numpy as jnp
 from jax.scipy import stats
 
 from rdesign.base import Prior, Model
-from rdesign.utils import info_gain
+from rdesign.utils import robust_info_gain
 
 
 class GaussianPrior(Prior):
@@ -43,7 +43,8 @@ class LinearGaussianModel(Model):
         return theta[0] + theta[1] * design
 
     def _compute_stddev(self, design: Array, theta: Array):
-        return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)
+        # return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)
+        return self.noise_std
 
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
         """
@@ -85,7 +86,7 @@ if __name__ == "__main__":
 
     import matplotlib as mpl
     import matplotlib.pyplot as plt
-    mpl.use("Qt5Agg")
+    # mpl.use("Qt5Agg")
 
     plt.rcParams.update({
         "text.usetex": True,
@@ -146,7 +147,7 @@ if __name__ == "__main__":
                 key, sub_key = random.split(key)
                 design = jnp.array([X[j, k], Y[j, k]])
                 info_gain_vals = info_gain_vals.at[i, j, k].set(
-                    info_gain(
+                    robust_info_gain(
                         key=sub_key,
                         design=design,
                         prior=prior,
@@ -174,8 +175,8 @@ if __name__ == "__main__":
         ax.set_ylabel('Design 2')
 
     plt.tight_layout()
-    plt.savefig('linear_regression_with_noise.pdf', dpi=300, bbox_inches='tight')
-    # plt.show()
+    # plt.savefig('linear_regression_with_noise.pdf', dpi=300, bbox_inches='tight')
+    plt.show()
 
     # fig = plt.figure(figsize=(15, 12))
     # axes = []
