@@ -19,7 +19,7 @@ dependencies = [
     "optax",
     "flax",
     "brax",
-    "distrax"
+    "distrax",
     "matplotlib",
 ]
 
