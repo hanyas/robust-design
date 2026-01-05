@@ -5,18 +5,18 @@ A generic implementation for Bayesian linear regression with a 2D parameter vect
 The experiment uses a Gaussian prior over the regression parameters and a Gaussian likelihood
 with linear structure in the parameters. The model is:
     theta ~ N(mu, Sigma)
-    x | theta, xi ~ N(theta_0 + theta_1 * xi, sigma^2(xi, theta))
-where xi is the design (input), and x is the observed output.
+    x | theta, xi ~ N(theta_0 + theta_1 * xi, sigma^2)
+where xi is the design, and x is the observed output.
 """
 import jax
 from jax import Array, random, numpy as jnp
 from jax.scipy import stats
 
-from rdesign.base import Prior, Model
+from rdesign.base import Prior, Likelihood
 from rdesign.utils import robust_info_gain
 
 
-class GaussianPrior(Prior):
+class Gaussian(Prior):
     """Gaussian prior over 2D parameter vector theta."""
     def __init__(self, mean: Array, covar: Array):
         """
@@ -32,7 +32,7 @@ class GaussianPrior(Prior):
         return random.multivariate_normal(key, self.mean, self.covar, shape=(num_samples,))
 
 
-class LinearGaussianModel(Model):
+class LinearRegression(Likelihood):
     """
     Linear regression model: x | theta, xi ~ N(theta_0 + theta_1 * xi, sigma^2)
     """
@@ -43,7 +43,7 @@ class LinearGaussianModel(Model):
         return theta[0] + theta[1] * design
 
     def _compute_stddev(self, design: Array, theta: Array):
-        return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)
+        return self.noise_std # + 1e-2 * (theta[0] + theta[1] * design)
         # return self.noise_std
 
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
@@ -73,10 +73,10 @@ def create_regression_experiment(
     prior_mean: Array = jnp.zeros(2),
     prior_cov: Array = jnp.eye(2),
     noise_std: Array = jnp.ones(1),
-) -> tuple[Prior, Model]:
-    prior = GaussianPrior(prior_mean, prior_cov)
-    model = LinearGaussianModel(noise_std=noise_std)
-    return prior, model
+) -> tuple[Prior, Likelihood]:
+    prior = Gaussian(prior_mean, prior_cov)
+    lklhd = LinearRegression(noise_std=noise_std)
+    return prior, lklhd
 
 
 # Example usage
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     ])
 
     key = random.PRNGKey(0)
-    prior, model = create_regression_experiment(
+    prior, lklhd = create_regression_experiment(
         prior_mean=prior_mean,
         prior_cov=prior_cov,
         noise_std=jnp.sqrt(1e-1)
@@ -137,8 +137,8 @@ if __name__ == "__main__":
 
     info_gain_vals = jnp.zeros((len(alphas), n_grid, n_grid))
 
-    num_outer = int(1 * 1024)
-    num_inner = int(1 * 1024)
+    num_outer = int(1 * 256)
+    num_inner = int(1 * 256)
 
     for i, alpha in enumerate(alphas):
         print(f"Evaluating alpha = {alpha:.2f}...")
@@ -151,7 +151,7 @@ if __name__ == "__main__":
                         rng_key=sub_key,
                         design=design,
                         prior=prior,
-                        model=model,
+                        lklhd=lklhd,
                         num_outer=num_outer,
                         num_inner=num_inner,
                         alpha=float(alpha)
@@ -177,22 +177,22 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
-    # fig = plt.figure(figsize=(15, 12))
-    # axes = []
-    # for i in range(len(alphas)):
-    #     ax = fig.add_subplot(1, 2, i + 1, projection='3d')
-    #     axes.append(ax)
-    #
-    # for i, (alpha, ax) in enumerate(zip(alphas, axes)):
-    #     surf = ax.plot_surface(
-    #         X, Y, info_gain_vals[i],
-    #         cmap='viridis',
-    #         edgecolor='none',
-    #         alpha=0.8
-    #     )
-    #     ax.set_xlabel('Design 1')
-    #     ax.set_ylabel('Design 2')
-    #     ax.set_title(f'alpha = {alpha:.2f}')
-    #
-    # plt.tight_layout()
-    # plt.show()
+    fig = plt.figure(figsize=(15, 12))
+    axes = []
+    for i in range(len(alphas)):
+        ax = fig.add_subplot(1, 2, i + 1, projection='3d')
+        axes.append(ax)
+    
+    for i, (alpha, ax) in enumerate(zip(alphas, axes)):
+        surf = ax.plot_surface(
+            X, Y, info_gain_vals[i],
+            cmap='viridis',
+            edgecolor='none',
+            alpha=0.8
+        )
+        ax.set_xlabel('Design 1')
+        ax.set_ylabel('Design 2')
+        ax.set_title(f'alpha = {alpha:.2f}')
+    
+    plt.tight_layout()
+    plt.show()

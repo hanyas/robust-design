@@ -15,10 +15,20 @@ jax.config.update("jax_enable_x64", True)
 def sibsons_estimator(
     design: Array,
     prior_cov: Array = 1.0 * jnp.eye(2),
-    lklhd_cov: Array = 1e-1 * jnp.eye(1),
+    lklhd_cov: Array = 0.1 * jnp.eye(1),
     order: float = 0.95,
 ) -> Array:
-    """Compute Sibson mutual information for linear regression design."""
+    """Compute Sibson mutual information for linear regression.
+    
+    Args:
+        design: Design points, shape (N,)
+        prior_cov: Prior covariance, shape (2, 2)
+        lklhd_cov: Likelihood covariance, shape (1, 1)
+        order: Sibson order parameter alpha in (0, 1)
+    
+    Returns:
+        Mutual information value (scalar)
+    """
     N = design.shape[0]
     A = jnp.concatenate(
         [
@@ -34,7 +44,7 @@ def sibsons_estimator(
 
 # Configuration
 dim = 2
-order = 0.9995
+order = 0.995
 learning_rate = 1e-2
 
 # REPS configuration

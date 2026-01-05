@@ -15,7 +15,7 @@ class Prior(Protocol):
         ...
 
 
-class Model(Protocol):
+class Likelihood(Protocol):
     """Protocol for likelihood models."""
 
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
@@ -70,7 +70,7 @@ class Policy(ABC):
 
 @dataclass
 class REPSConfig:
-    """Configuration for REPS (mirror descent) optimization.
+    """Configuration for REPS optimization.
 
     Args:
         num_samples: Number of samples per iteration for Monte Carlo estimation.
