@@ -43,8 +43,8 @@ class LinearGaussianModel(Model):
         return theta[0] + theta[1] * design
 
     def _compute_stddev(self, design: Array, theta: Array):
-        # return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)
-        return self.noise_std
+        return self.noise_std + 1e-2 * (theta[0] + theta[1] * design)
+        # return self.noise_std
 
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
         """
@@ -148,7 +148,7 @@ if __name__ == "__main__":
                 design = jnp.array([X[j, k], Y[j, k]])
                 info_gain_vals = info_gain_vals.at[i, j, k].set(
                     robust_info_gain(
-                        key=sub_key,
+                        rng_key=sub_key,
                         design=design,
                         prior=prior,
                         model=model,
@@ -175,7 +175,6 @@ if __name__ == "__main__":
         ax.set_ylabel('Design 2')
 
     plt.tight_layout()
-    # plt.savefig('linear_regression_with_noise.pdf', dpi=300, bbox_inches='tight')
     plt.show()
 
     # fig = plt.figure(figsize=(15, 12))
