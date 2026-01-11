@@ -7,23 +7,80 @@ from flax.training.train_state import TrainState
 from optax import GradientTransformation
 
 
-class Prior(Protocol):
-    """Protocol for prior distributions."""
-
+class Distribution(Protocol):
+    """Base protocol for all distributions.
+    
+    Uses structural typing - any class with these methods satisfies the protocol.
+    """
+    
     def sample(self, key: Array, num_samples: int) -> Array:
-        """Sample from the prior distribution."""
+        """Sample from the distribution.
+        
+        Args:
+            key: Random key
+            num_samples: Number of samples to draw
+            
+        Returns:
+            Samples of shape (num_samples, dim)
+        """
         ...
+    
+    def logpdf(self, value: Array) -> Array:
+        """Compute log probability density.
+        
+        Args:
+            value: Value(s) to evaluate, shape (dim,) or (n, dim)
+            
+        Returns:
+            Log probability, scalar or shape (n,)
+        """
+        ...
+    
+    @property
+    def dim(self) -> int:
+        """Dimension of the distribution."""
+        ...
+
+
+class Prior(Distribution, Protocol):
+    """Prior distribution p(θ) over parameters.
+    
+    Extends Distribution with no additional requirements.
+    Any Distribution can serve as a Prior.
+    """
+    pass
 
 
 class Likelihood(Protocol):
-    """Protocol for likelihood models."""
-
+    """Likelihood model p(x | θ, ξ).
+    
+    Maps parameters θ and designs ξ to observation distributions.
+    """
+    
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
-        """Sample from the likelihood p(x | design, theta)."""
+        """Sample observations given parameters and design.
+        
+        Args:
+            key: Random key
+            design: Design points ξ
+            theta: Parameters θ
+            
+        Returns:
+            Observations x
+        """
         ...
-
+    
     def logpdf(self, x: Array, design: Array, theta: Array) -> Array:
-        """Compute log likelihood p(x | design, theta)."""
+        """Compute log likelihood p(x | θ, ξ).
+        
+        Args:
+            x: Observations
+            design: Design points ξ
+            theta: Parameters θ
+            
+        Returns:
+            Log likelihood
+        """
         ...
 
 

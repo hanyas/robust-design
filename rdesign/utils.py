@@ -77,8 +77,8 @@ def log_progress(
     print(f"[{iteration:5d}/{max_iterations}]  {metrics_str}")
 
 
-@partial(jax.jit, static_argnums=(2, 3, 4, 5))
-def robust_info_gain(
+@partial(jax.jit, static_argnums=(4, 5, 6))
+def sibson_alpha_mutual_information(
     rng_key: Array,
     design: Array,
     prior: Prior,
@@ -88,45 +88,48 @@ def robust_info_gain(
     alpha: float,
 ) -> Array:
     """
-    Generic nested Monte Carlo estimator for Sibson information gain at a single design,
-    using log-domain importance weights for numerical stability.
-
+    Nested Monte Carlo estimator for Sibson's α-mutual information.
+    
     Args:
         rng_key: JAX PRNGKey
         design: Design point (shape depends on problem)
-        prior: Prior distribution object with sample() and logpdf() methods
-        model: Likelihood model object with sample() and logpdf() methods
+        prior: Prior distribution
+        lklhd: Likelihood model
         num_outer: Number of outer samples
         num_inner: Number of inner samples per outer sample
-        alpha: Sibson order parameter
-
+        alpha: Sibson order parameter α ∈ (0, 1)
+    
     Returns:
-        info: Estimated Sibson information gain (float)
+        Estimated Sibson information gain (scalar)
     """
-
     # 1. Sample outer theta from prior
-    rng_key, outer_key = random.split(rng_key, 2)
+    rng_key, outer_key = random.split(rng_key)
     outer_thetas = prior.sample(outer_key, num_outer)
-
+    
     # 2. For each outer theta, sample x ~ p(x | xi, theta)
     rng_key, sub_key = random.split(rng_key)
     x_keys = random.split(sub_key, num_outer)
-    x_samples = jax.vmap(lambda k, theta: lklhd.sample(k, design, theta))(x_keys, outer_thetas)
-
+    x_samples = jax.vmap(lambda k, theta: lklhd.sample(k, design, theta))(
+        x_keys, outer_thetas
+    )
+    
     # 3. Inner integral: for each (x, theta), approximate
-    #   g(x) = \int p(theta) [ p(x | xi, theta) / p(x | xi)]^alpha dtheta
+    #    g(x) = ∫ p(θ) [p(x|ξ,θ) / p(x|ξ)]^α dθ
     def inner_log_integral(rng_key, x):
-        rng_key, inner_key = random.split(rng_key, 2)
+        rng_key, inner_key = random.split(rng_key)
         inner_thetas = prior.sample(inner_key, num_inner)
+        
         log_lklhd = jax.vmap(lambda theta: lklhd.logpdf(x, design, theta))(inner_thetas)
         log_mrgnl = jax.nn.logsumexp(log_lklhd) - jnp.log(num_inner)
         log_ws = alpha * (log_lklhd - log_mrgnl)
+        
         return jax.nn.logsumexp(log_ws) - jnp.log(num_inner)
-
+    
     rng_key, sub_key = random.split(rng_key)
     inner_keys = random.split(sub_key, num_outer)
     log_g = jax.vmap(inner_log_integral)(inner_keys, x_samples)
-
-    # 4. Outer expectation: \int p(x | xi) * g(x)^(1 / alpha) dx
+    
+    # 4. Outer expectation: ∫ p(x|ξ) g(x)^(1/α) dx
     info = jax.nn.logsumexp(log_g / alpha) - jnp.log(num_outer)
+    
     return (alpha / (alpha - 1)) * info

@@ -26,7 +26,7 @@ class GaussianParams(nn.Module):
         return mean, log_std
 
 
-class GaussianPolicy(Policy):
+class ParametricGaussian(Policy):
     """Gaussian policy with optional bijector for constrained action spaces."""
 
     def __init__(
