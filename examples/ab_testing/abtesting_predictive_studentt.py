@@ -290,7 +290,7 @@ def run_experiment(
         num_participants: Number of participants in experiment
         num_test: Number of test samples at test design
         model: ABTesting model (with Gaussian likelihood)
-        true_lklhd: Student-t likelihood (true process)
+        lklhd: Student-t likelihood (true process)
         alpha_values: Alpha values to evaluate for models
         random_design: If True, use random training design; else use balanced (n/2, n/2)
     
@@ -306,7 +306,7 @@ def run_experiment(
     if random_design:
         design_train = int(jr.randint(key, shape=(), minval=0, maxval=num_participants + 1))
     else:
-        design_train = num_participants // 2  # Balanced design
+        design_train = num_participants // 2
     
     # 3. Sample training data from TRUE Student-t process
     rng_key, key = jr.split(rng_key)
@@ -435,8 +435,7 @@ if __name__ == "__main__":
         
         rng_key, key = jr.split(rng_key)
         scores, tv_dists = run_experiment(
-            key, num_participants, num_test, model, true_lklhd,
-            alpha_values
+            key, num_participants, num_test, model, true_lklhd, alpha_values
         )
         
         results_elpd = results_elpd.at[:, seed].set(scores)
@@ -531,6 +530,7 @@ if __name__ == "__main__":
     ax1.set_ylabel('ELPD', fontsize=12)
     ax1.set_title(f'ELPD vs Alpha (Student-t True Process, df={df_true})', fontsize=13, fontweight='bold')
     ax1.set_xscale('log')
+    ax2.set_ylim([-10.0, -70.0])
     ax1.legend(fontsize=11)
     ax1.grid(alpha=0.3)
     
@@ -552,7 +552,7 @@ if __name__ == "__main__":
     ax2.set_ylabel(f'√n × TV Distance (n={num_participants})', fontsize=12)
     ax2.set_title(f'TV Distance vs Alpha (Student-t True Process, df={df_true})', fontsize=13, fontweight='bold')
     ax2.set_xscale('log')
-    ax2.set_ylim([-0.5, 2.0])
+    ax2.set_ylim([0.0, 2.5])
     ax2.legend(fontsize=11)
     ax2.grid(alpha=0.3)
     
