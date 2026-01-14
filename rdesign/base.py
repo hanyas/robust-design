@@ -125,6 +125,14 @@ class Policy(ABC):
         )
 
 
+class SigmaPoints(NamedTuple):
+    """Sigma points for quadrature"""
+    points: Array  # (n_points, dim)
+    wm: Array      # weights for mean (n_points,)
+    wc: Array      # weights for covariance (n_points,)
+    xi: Array      # untransformed points (dim, n_points)
+
+
 @dataclass
 class REPSConfig:
     """Configuration for REPS optimization.

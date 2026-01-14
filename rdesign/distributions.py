@@ -111,16 +111,6 @@ class Gaussian(NamedTuple):
     def renyi_to(self, other: 'Gaussian', alpha: float) -> float:
         """Compute Rényi divergence of order α to another Gaussian.
         
-        D_α(self || other) for α ∈ (0, 1)
-        
-        For Gaussians, the Rényi divergence has a closed form:
-        D_α = (1/(2(1-α))) [quad_term + logdet_term]
-        
-        where:
-        - Σ_α = (1-α)Σ₁ + αΣ₂ (geometric mean of covariances)
-        - quad_term = (μ₁ - μ₂)ᵀ Σ_α⁻¹ (μ₁ - μ₂)
-        - logdet_term = (1-α) log|Σ₁| + α log|Σ₂| - log|Σ_α|
-        
         Args:
             other: Target Gaussian distribution
             alpha: Order parameter α ∈ (0, 1)
@@ -128,25 +118,45 @@ class Gaussian(NamedTuple):
         Returns:
             Rényi divergence of order α
         """
-        # Weighted covariance: Σ_α = (1-α)Σ₁ + αΣ₂
-        Sigma_alpha = (1 - alpha) * self.cov + alpha * other.cov
-        Sigma_alpha_inv = jnp.linalg.inv(Sigma_alpha)
-        
-        # Quadratic term: (μ₁ - μ₂)ᵀ Σ_α⁻¹ (μ₁ - μ₂)
-        diff = self.mean - other.mean
-        quad_term = diff.T @ Sigma_alpha_inv @ diff
-        
+        d = self.dim 
+
+        # Precision of the geometric mixture
+        Sigma_alpha_inv = alpha * self.precision() + (1 - alpha) * other.precision()
+        Sigma_alpha = jnp.linalg.inv(Sigma_alpha_inv)
+
+        # Mean of the geometric mixture
+        mu_alpha = Sigma_alpha @ (
+            alpha * self.precision() @ self.mean
+            + (1 - alpha) * other.precision() @ other.mean
+        )
+
+        # Log-normalizer helper: 0.5 * (k log(2π) + log|Σ|)
+        def log_Z_val(logdet_sigma):
+            return 0.5 * d * jnp.log(2 * jnp.pi) + 0.5 * logdet_sigma
+
         # Log determinant terms
         _, logdet_self = jnp.linalg.slogdet(self.cov)
         _, logdet_other = jnp.linalg.slogdet(other.cov)
         _, logdet_alpha = jnp.linalg.slogdet(Sigma_alpha)
+
+        log_Z_self = log_Z_val(logdet_self)
+        log_Z_other = log_Z_val(logdet_other)
+        log_Z_alpha = log_Z_val(logdet_alpha)
         
-        logdet_term = (1 - alpha) * logdet_self + alpha * logdet_other - logdet_alpha
+        # Quadratic scaling terms
+        quad_term = 0.5 * (
+            alpha * self.mean @ self.precision() @ self.mean 
+            + (1 - alpha) * other.mean @ other.precision() @ other.mean
+            - mu_alpha @ Sigma_alpha_inv @ mu_alpha
+        )
         
-        return (1.0 / (2.0 * (1.0 - alpha))) * (quad_term + logdet_term)
-    
+        # Log integral of
+        log_integral = log_Z_alpha - alpha * log_Z_self - (1 - alpha) * log_Z_other - quad_term
+
+        return (1.0 / (alpha - 1.0)) * log_integral
+
     def precision(self) -> Array:
-        """Compute precision matrix Λ = Σ⁻¹.
+        """Compute precision matrix.
         
         Returns:
             Precision matrix, shape (dim, dim)
