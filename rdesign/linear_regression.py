@@ -150,7 +150,7 @@ class LinearRegression(NamedTuple):
 
         return Gaussian(mean=posterior_mean, cov=posterior_cov)
 
-    def get_bayes_predictive(self, design: Array) -> Gaussian:
+    def get_prior_predictive(self, design: Array) -> Gaussian:
         """
         Compute prior predictive distribution p(x | ξ).
 
@@ -166,21 +166,21 @@ class LinearRegression(NamedTuple):
             cov=H @ self.prior.cov @ H.T + self.likelihood.cov(design)
         )
 
-    def get_posterior_predictive(self, posterior: Gaussian, design_new: Array, alpha=float) -> Gaussian:
+    def get_posterior_predictive(self, posterior: Gaussian, design: Array, alpha=float) -> Gaussian:
         """
         Compute posterior predictive distribution p(x_new | x, ξ, ξ_new).
 
         Args:
             posterior: Posterior distribution p(θ | x, ξ)
-            design_new: New design points ξ_new, shape (M,)
+            design: Design points ξ, shape (N,)
 
         Returns:
             Gaussian distribution
         """
-        H_new = self.likelihood.design_matrix(design_new)
+        H = self.likelihood.design_matrix(design)
         return Gaussian(
-            mean=H_new @ posterior.mean,
-            cov=H_new @ posterior.cov @ H_new.T + self.likelihood.cov(design_new) / alpha
+            mean=H @ posterior.mean,
+            cov=H @ posterior.cov @ H.T + self.likelihood.cov(design) / alpha
         )
 
     # =========================================================================
@@ -201,7 +201,7 @@ class LinearRegression(NamedTuple):
         H = self.likelihood.design_matrix(design)
         return Gaussian(
             mean=H @ self.prior.mean,
-            cov=H @ self.prior.cov @ H.T + self.likelihood.cov(design) / alpha
+            cov=alpha * H @ self.prior.cov @ H.T + self.likelihood.cov(design)
         )
 
     def get_tilted_posterior(self, x: Array, design: Array, alpha: float) -> Gaussian:
@@ -217,11 +217,11 @@ class LinearRegression(NamedTuple):
             Gaussian α-tilted posterior distribution
         """
         H = self.likelihood.design_matrix(design)
-        prior_prec = jnp.linalg.inv(self.prior.cov)
-        lklhd_cov = self.likelihood.cov(design) / alpha
+        prior_prec = self.prior.precision()
+        lklhd_cov_alpha = self.likelihood.cov(design) / alpha
 
         # Tilted posterior precision
-        posterior_prec = prior_prec + H.T @ jnp.linalg.inv(lklhd_cov) @ H
+        posterior_prec = prior_prec + H.T @ jnp.linalg.inv(lklhd_cov_alpha) @ H
 
         # Tilted posterior covariance
         posterior_cov = jnp.linalg.inv(posterior_prec)
@@ -229,7 +229,7 @@ class LinearRegression(NamedTuple):
         # Tilted posterior mean
         posterior_mean = posterior_cov @ (
             prior_prec @ self.prior.mean
-            + H.T @ jnp.linalg.inv(lklhd_cov) @ x
+            + H.T @ jnp.linalg.inv(lklhd_cov_alpha) @ x
         )
 
         return Gaussian(mean=posterior_mean, cov=posterior_cov)
@@ -246,7 +246,14 @@ class LinearRegression(NamedTuple):
             Gaussian α-tilted joint distribution over [θ, x]
         """
         H = self.likelihood.design_matrix(design)
-        lklhd_cov = self.likelihood.cov(design) / alpha
+        prior_prec = self.prior.precision()
+        lklhd_cov_alpha = self.likelihood.cov(design) / alpha
+
+        # Tilted posterior precision
+        posterior_prec = prior_prec + H.T @ jnp.linalg.inv(lklhd_cov_alpha) @ H
+
+        # Tilted posterior covariance
+        posterior_cov = jnp.linalg.inv(posterior_prec)
 
         # Mean: [θ, x]
         mean = jnp.concatenate([
@@ -257,12 +264,12 @@ class LinearRegression(NamedTuple):
         # Covariance blocks
         prior_cov = self.prior.cov
         cross_cov = prior_cov @ H.T
-        post_cov = H @ prior_cov @ H.T + lklhd_cov
+        tilted_cov = H @ prior_cov @ H.T + lklhd_cov_alpha
 
         # Assemble covariance matrix
         cov = jnp.block([
-            [prior_cov,   cross_cov],
-            [cross_cov.T, post_cov]
+            [alpha * prior_cov + (1 - alpha) * posterior_cov,   alpha * cross_cov],
+            [alpha * cross_cov.T,                               alpha * tilted_cov]
         ])
 
         return Gaussian(mean=mean, cov=cov)
