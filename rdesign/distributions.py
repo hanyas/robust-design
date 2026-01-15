@@ -13,18 +13,14 @@ from typing import NamedTuple
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
+
 from jax.scipy.stats import multivariate_normal
+from jax.scipy.special import betaln, gammaln, digamma, logsumexp
 
 
 class Gaussian(NamedTuple):
-    """Base multivariate Gaussian distribution N(μ, Σ).
-    
-    This is the base class for all Gaussian distributions. Use specific
-    subclasses for clarity:
-    - GaussianPrior: for p(θ)
-    - GaussianPosterior: for p(θ | x, ξ)
-    - GaussianPredictive: for p(x | ξ) or p(x_new | x, ξ)
-    
+    """Multivariate Gaussian distribution N(μ, Σ).
+        
     Args:
         mean: Mean vector μ, shape (d,)
         cov: Covariance matrix Σ, shape (d, d)
@@ -32,17 +28,17 @@ class Gaussian(NamedTuple):
     mean: Array
     cov: Array
     
-    def sample(self, key: Array, num_samples: int) -> Array:
+    def sample(self, rng_key: Array, num_samples: int) -> Array:
         """Sample from the Gaussian distribution.
         
         Args:
-            key: JAX random key
+            rng_key: JAX random key
             num_samples: Number of samples to draw
             
         Returns:
             Samples of shape (num_samples, dim)
         """
-        return jr.multivariate_normal(key, self.mean, self.cov, shape=(num_samples,))
+        return jr.multivariate_normal(rng_key, self.mean, self.cov, shape=(num_samples,))
     
     def logpdf(self, value: Array) -> Array:
         """Compute log probability density.
@@ -64,10 +60,7 @@ class Gaussian(NamedTuple):
     
     def entropy(self) -> float:
         """Compute differential entropy H[N(μ, Σ)].
-        
-        For a d-dimensional Gaussian:
-        H[N(μ, Σ)] = (d/2) log(2πe) + (1/2) log|Σ|
-        
+                
         Returns:
             Differential entropy in nats
         """
@@ -77,11 +70,6 @@ class Gaussian(NamedTuple):
     
     def kl_to(self, other: 'Gaussian') -> float:
         """Compute KL divergence to another Gaussian.
-        
-        D_KL(self || other) = KL(N(μ₁, Σ₁) || N(μ₂, Σ₂))
-        
-        Formula:
-        D_KL = (1/2) [tr(Σ₂⁻¹ Σ₁) + (μ₂ - μ₁)ᵀ Σ₂⁻¹ (μ₂ - μ₁) - d + log(|Σ₂|/|Σ₁|)]
         
         Args:
             other: Target Gaussian distribution
@@ -165,9 +153,7 @@ class Gaussian(NamedTuple):
     
     def mahalanobis(self, value: Array) -> Array:
         """Compute squared Mahalanobis distance.
-        
-        d²(x, μ) = (x - μ)ᵀ Σ⁻¹ (x - μ)
-        
+                
         Args:
             value: Point(s) to evaluate, shape (dim,) or (n, dim)
             
@@ -177,3 +163,71 @@ class Gaussian(NamedTuple):
         diff = jnp.atleast_2d(value - self.mean)
         precision = self.precision()
         return jnp.sum(diff @ precision * diff, axis=1)
+
+
+class Beta(NamedTuple):
+    """
+    Beta distribution parameterized by delta (δ) and gamma (γ).
+
+    Args:
+        delta: Shape parameter δ > 0, array of shape (2,) for [group_A, group_B]
+        gamma: Shape parameter γ > 0, array of shape (2,) for [group_A, group_B]
+    """
+    delta: Array  # shape (2,) - corresponds to δ in the paper
+    gamma: Array   # shape (2,) - corresponds to γ in the paper
+
+    @property
+    def mean(self) -> Array:
+        """E[θ] = δ / (δ + γ)"""
+        return self.delta / (self.delta + self.gamma)
+
+    @property
+    def var(self) -> Array:
+        """Var[θ] = δγ / [(δ + γ)² (δ + γ + 1)]"""
+        total = self.delta + self.gamma
+        return (self.delta * self.gamma) / (total ** 2 * (total + 1))
+
+    @property
+    def concentration(self) -> Array:
+        """Total pseudo-observations δ + γ."""
+        return self.delta + self.gamma
+
+    def sample(self, rng_key: Array, shape: tuple = ()) -> Array:
+        """Sample from Beta(δ, γ)."""
+        return jr.beta(rng_key, self.delta, self.gamma, shape=shape + (2,))
+
+    def log_normalizer(self) -> Array:
+        """Log normalizing constant: log B(δ, γ)"""
+        return betaln(self.delta, self.gamma)
+
+    def kl_to(self, other: 'Beta') -> Array:
+        """
+        KL divergence D_KL(self || other).
+        """
+        psi_self_delta = digamma(self.delta)
+        psi_self_gamma = digamma(self.gamma)
+        psi_self_total = digamma(self.delta + self.gamma)
+
+        kl = (
+            betaln(other.delta, other.gamma) - betaln(self.delta, self.gamma) +
+            (self.delta - other.delta) * (psi_self_delta - psi_self_total) +
+            (self.gamma - other.gamma) * (psi_self_gamma - psi_self_total)
+        )
+        return jnp.sum(kl)
+
+    def renyi_to(self, other: 'Beta', alpha: float) -> float:
+        """
+        Compute Rényi divergence D_α(self || other) for Beta distributions.
+        """
+        # Effective parameters for the integral
+        delta_eff = alpha * (self.delta - 1) + (1 - alpha) * (other.delta - 1) + 1
+        gamma_eff = alpha * (self.gamma - 1) + (1 - alpha) * (other.gamma - 1) + 1
+                
+        log_integral = (
+            betaln(delta_eff, gamma_eff) 
+            - alpha * betaln(self.delta, self.gamma) 
+            - (1 - alpha) * betaln(other.delta, other.gamma)
+        )
+        
+        divergence = (1.0 / (alpha - 1.0)) * log_integral
+        return jnp.sum(divergence)

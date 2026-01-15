@@ -1,527 +1,383 @@
 """
-A/B Testing Model for Robust Bayesian Experimental Design
+Conjugate Beta-Binomial A/B Testing for Robust Bayesian Experimental Design
 
-This module implements an A/B testing model with support for:
+This module implements a conjugate Beta-Binomial A/B testing model with support for:
 - Standard Bayesian inference (prior, likelihood, posterior)
 - Robust experimental design using Sibson's α-mutual information
-- Analytical formulas for conjugate Gaussian updates
-
-The design follows the Protocol pattern from base.py with separate Gaussian prior
-and ABTestingLikelihood objects.
-
-Model Structure:
-- Parameters θ = [θ₀, θ₁]: mean responses for groups 0 and 1
-- Design ξ ∈ {0, 1, ..., n}: number of participants assigned to group 0
-- Observations x ∈ ℝⁿ: independent Gaussian responses per participant
+- Worst-case generative processes under model misspecification
 """
 
-from typing import NamedTuple
+from typing import NamedTuple, Tuple
 
 import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 
-from rdesign.distributions import Gaussian
+from jax.scipy.special import betaln, gammaln, digamma, logsumexp
+
+from rdesign.distributions import Beta
 
 
-class MaskedLinearGaussian(NamedTuple):
+class BetaBinomial(NamedTuple):
     """
-    Gaussian likelihood for A/B testing with independent observations.
-    
-    Each participant is assigned to one of two groups. Participants in group g
-    have observations drawn from N(θ_g, σ_g²).
-    
-    Args:
-        num_participants: Total number of participants n
-        observation_std_devs: Standard deviations [σ₀, σ₁] for each group
+    Beta-Binomial distribution
+    Represents the marginal likelihood or predictive distribution.
+    """
+    trials: Array  # shape (2,) for [n_a, n_b]
+    delta: Array   # shape (2,)
+    gamma: Array   # shape (2,)
+
+    def logpmf(self, x: Array) -> float:
+        """
+        Compute log probability mass function.
+        """
+        # Log Binomial coefficient
+        log_binom = (
+            gammaln(self.trials + 1)
+            - gammaln(x + 1)
+            - gammaln(self.trials - x + 1)
+        )
+
+        # Log Beta function ratio
+        log_beta_ratio = (
+            betaln(self.delta + x, self.gamma + self.trials - x) -
+            betaln(self.delta, self.gamma)
+        )
+
+        # Sum over groups (independence)
+        return jnp.sum(jnp.where(self.trials > 0, log_binom + log_beta_ratio, 0.0))
+
+    def sample(self, rng_key: Array, shape: tuple = ()) -> Array:
+        """Sample from Beta-Binomial via hierarchical sampling."""
+        key_theta, key_x = jr.split(rng_key)
+        # 1. Sample theta from Beta
+        theta = jr.beta(key_theta, self.delta, self.gamma, shape=shape + (2,))
+        # 2. Sample x from Binomial using theta
+        return jr.binomial(key_x, self.trials.astype(int), theta)
+
+
+class TiltedBetaBinomial(NamedTuple):
+    """
+    α-tilted Marginal distribution p_α(x | ξ).
+    """
+    trials: Array  # shape (2,)
+    delta: Array   # shape (2,)
+    gamma: Array   # shape (2,)
+    alpha: float
+
+    def _log_Z_alpha_k(self, x_k: Array, n_k: Array, delta_k: float, gamma_k: float) -> Array:
+        """
+        Compute unnormalized log probability term log Z_α(k, n) for a single group.
+        """
+        # Ensure we don't have NaNs by masking
+        mask = (x_k <= n_k) & (x_k >= 0)
+        safe_x = jnp.where(mask, x_k, 0.0)
+        safe_n_minus_x = jnp.where(mask, n_k - x_k, 0.0)
+
+        log_binom = (
+            gammaln(n_k + 1)
+            - gammaln(safe_x + 1)
+            - gammaln(safe_n_minus_x + 1)
+        )
+        log_beta_term = (
+            betaln(delta_k + self.alpha * safe_x, gamma_k + self.alpha * safe_n_minus_x) -
+            betaln(delta_k, gamma_k)
+        )
+        res = self.alpha * log_binom + log_beta_term
+        return jnp.where(mask, res, -jnp.inf)
+
+    def log_pmf(self, x: Array) -> Array:
+        """
+        Compute normalized log p_α(x).
+        """
+        # Calculate unnormalized log probs for the specific x
+        log_Z_a = self._log_Z_alpha_k(x[0], self.trials[0], self.delta[0], self.gamma[0])
+        log_Z_b = self._log_Z_alpha_k(x[1], self.trials[1], self.delta[1], self.gamma[1])
+
+        # Calculate partition functions Z_alpha(xi) for normalization
+        # We must sum Z_alpha(k)^(1/alpha) over all possible k
+        # For individual log_pmf we use int(n) as support
+        norm_a = self._compute_log_normalizer(self.trials[0], self.delta[0], self.gamma[0])
+        norm_b = self._compute_log_normalizer(self.trials[1], self.delta[1], self.gamma[1])
+
+        # log p_alpha(x) = (1/alpha) * log Z_alpha(x) - log_normalizer
+        log_prob_a = (1.0 / self.alpha) * log_Z_a - norm_a
+        log_prob_b = (1.0 / self.alpha) * log_Z_b - norm_b
+
+        return log_prob_a + log_prob_b
+
+    def _compute_log_normalizer(self, n: Array, delta: float, gamma: float, max_n: int = None) -> Array:
+        """Compute log sum_k Z_α(k)^(1/α)."""
+        if max_n is None:
+            # Fallback to concrete support if max_n is not provided
+            # This will fail under vmap if n is a tracer
+            if n <= 0: return jnp.array(0.0)
+            n_int = int(n)
+            k_vals = jnp.arange(n_int + 1, dtype=jnp.float32)
+        else:
+            # JAX-friendly version for vmap
+            k_vals = jnp.arange(max_n + 1, dtype=jnp.float32)
+
+        log_Z_vals = self._log_Z_alpha_k(k_vals, n, delta, gamma)
+        return logsumexp(log_Z_vals / self.alpha)
+
+    def sample(self, rng_key: Array) -> Array:
+        """
+        Sample from the discrete tilted marginal.
+        """
+        def sample_single_group(k, n, d, g):
+            if n <= 0: return 0.0
+            k_vals = jnp.arange(int(n) + 1, dtype=jnp.float32)
+            # Unnormalized log probs in the tilted distribution: (1/alpha) * log Z_alpha
+            logits = self._log_Z_alpha_k(k_vals, n, d, g) / self.alpha
+            idx = jr.categorical(k, logits)
+            return idx.astype(jnp.float32)
+
+        key_a, key_b = jr.split(rng_key)
+        x_a = sample_single_group(key_a, self.trials[0], self.delta[0], self.gamma[0])
+        x_b = sample_single_group(key_b, self.trials[1], self.delta[1], self.gamma[1])
+        return jnp.array([x_a, x_b])
+
+
+class Binomial(NamedTuple):
+    """
+    Binomial likelihood for A/B testing.
     """
     num_participants: int
-    observation_std_devs: Array
-    
-    def _group_mask(self, design: Array) -> Array:
-        """
-        Create boolean mask indicating group assignment.
-        
-        Args:
-            design: Number of participants in group 0 (scalar or array)
-            
-        Returns:
-            Boolean array of shape (num_participants,) where True = group 0
-        """
-        design = jnp.asarray(design, dtype=jnp.int32)
-        design = jnp.clip(design, 0, self.num_participants)
-        idx = jnp.arange(self.num_participants)
-        return idx < design
-    
-    def sample(self, key: Array, design: Array, theta: Array) -> Array:
-        """
-        Sample from the likelihood p(x | θ, ξ).
-        
-        Args:
-            key: Random key
-            design: Number of participants in group 0
-            theta: Parameters [θ₀, θ₁]
-            
-        Returns:
-            Observations x of shape (num_participants,)
-        """
-        mean = self.mean(design, theta)
-        std = self._observation_std(design)
-        return mean + jr.normal(key, (self.num_participants,)) * std
-    
-    def logpdf(self, x: Array, design: Array, theta: Array) -> Array:
-        """
-        Compute log p(x | θ, ξ).
-        
-        Since observations are independent, this is the sum of individual log pdfs.
-        
-        Args:
-            x: Observations, shape (num_participants,)
-            design: Number of participants in group 0
-            theta: Parameters [θ₀, θ₁]
-            
-        Returns:
-            Log likelihood scalar
-        """
-        from jax.scipy.stats import norm
-        
-        mean = self.mean(design, theta)
-        scale = self._observation_std(design)
-        return jnp.sum(norm.logpdf(x, loc=mean, scale=scale))
-    
-    def mean(self, design: Array, theta: Array) -> Array:
-        """
-        Compute the mean of p(x | θ, ξ).
-        
-        Args:
-            design: Number of participants in group 0
-            theta: Parameters [θ₀, θ₁]
-            
-        Returns:
-            Mean vector of shape (num_participants,)
-        """
-        mask = self._group_mask(design)
-        return jnp.where(mask, theta[0], theta[1])
-    
-    def _observation_std(self, design: Array) -> Array:
-        """
-        Get per-participant observation standard deviations.
-        
-        Args:
-            design: Number of participants in group 0
-            
-        Returns:
-            Standard deviation vector of shape (num_participants,)
-        """
-        mask = self._group_mask(design)
-        return jnp.where(mask, self.observation_std_devs[0], self.observation_std_devs[1])
-    
-    def cov(self, design: Array, alpha: float = 1.0) -> Array:
-        """
-        Compute the covariance of p(x | θ, ξ) with α-scaling.
-        
-        For standard likelihood (α=1): Σ = diag([σ₀², ..., σ₀², σ₁², ..., σ₁²])
-        For tilted likelihood: Σ = (1/α) * diag([σ₀², ..., σ₀², σ₁², ..., σ₁²])
-        
-        Args:
-            design: Number of participants in group 0
-            alpha: Misspecification order α ∈ (0, 1], default 1.0
-            
-        Returns:
-            Covariance matrix of shape (num_participants, num_participants)
-        """
-        std = self._observation_std(design)
-        return (1.0 / alpha) * jnp.diag(std ** 2)
+
+    def get_trials(self, design: Array) -> Array:
+        """Get number of trials (n_a, n_b) for each group."""
+        n_a = design
+        n_b = self.num_participants - design
+        return jnp.array([n_a, n_b], dtype=jnp.float32)
 
 
 class ABTesting(NamedTuple):
     """
-    A/B Testing Model for Robust Experimental Design.
-    
-    This is a stateless factory that constructs distributions on demand.
-    All methods are pure functions with no side effects.
-    
+    Conjugate Beta-Binomial A/B Testing Model for Robust Experimental Design.
+
     Args:
-        prior: Gaussian prior over parameters θ = [θ₀, θ₁]
-        likelihood: A/B testing likelihood p(x | θ, ξ)
+        prior: Beta prior
+        likelihood: Binomial
     """
-    prior: Gaussian
-    likelihood: MaskedLinearGaussian
-    
+    prior: Beta
+    likelihood: Binomial
+
     # =========================================================================
-    # Bayesian Inference (α = 1)
+    # Bayesian Inference
     # =========================================================================
-    
-    def get_bayes_posterior(self, x: Array, design: Array) -> Gaussian:
+
+    def get_bayes_posterior(self, x: Array, design: Array) -> Beta:
         """
-        Compute Bayes posterior distribution p(θ | x, ξ) = N(μₙ, Σₙ).
-        
-        Uses analytical conjugate Gaussian update formulas. Since observations
-        are independent within each group, we can update each θ_g separately.
-        
+        Compute Bayes posterior p(θ | x, ξ).
+
         Args:
-            x: Observations, shape (num_participants,)
-            design: Number of participants in group 0 (scalar)
-            
+            x: Observations [x_a, x_b], shape (2,)
+            design: Number of participants in group A
+
         Returns:
-            Gaussian posterior distribution
+            Beta posterior distribution
         """
-        design = jnp.asarray(design, dtype=jnp.int32)
-        design = jnp.clip(design, 0, self.likelihood.num_participants)
-        
-        # Group assignments
-        mask = self.likelihood._group_mask(design)
-        n_group0 = design
-        n_group1 = self.likelihood.num_participants - design
-        
-        # Prior parameters
-        prior_means = self.prior.mean
-        prior_vars = jnp.diag(self.prior.cov)
-        
-        # Observation variances
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        # Posterior variances (closed form for conjugate Gaussian)
-        posterior_var0 = 1.0 / (1.0 / prior_vars[0] + n_group0 / obs_vars[0])
-        posterior_var1 = 1.0 / (1.0 / prior_vars[1] + n_group1 / obs_vars[1])
-        
-        # Sum of observations in each group
-        sum_group0 = jnp.sum(x * mask)
-        sum_group1 = jnp.sum(x * (~mask))
-        
-        # Posterior means
-        posterior_mean0 = posterior_var0 * (prior_means[0] / prior_vars[0] + sum_group0 / obs_vars[0])
-        posterior_mean1 = posterior_var1 * (prior_means[1] / prior_vars[1] + sum_group1 / obs_vars[1])
-        
-        posterior_mean = jnp.array([posterior_mean0, posterior_mean1])
-        posterior_cov = jnp.diag(jnp.array([posterior_var0, posterior_var1]))
-        
-        return Gaussian(mean=posterior_mean, cov=posterior_cov)
-    
-    def get_bayes_predictive(self, design: Array) -> Gaussian:
-        """
-        Compute prior predictive distribution p(x | ξ).
-        
-        p(x | ξ) = ∫ p(x | θ, ξ) p(θ) dθ
-        
-        Since observations are independent given θ, the predictive distribution
-        is a product of independent Gaussians with inflated variances.
-        
-        Args:
-            design: Number of participants in group 0
-            
-        Returns:
-            Gaussian distribution (with diagonal covariance)
-        """
-        # Mean: E[x | ξ] = E[E[x | θ, ξ]] = E[θ_mask]
-        mask = self.likelihood._group_mask(design)
-        mean = jnp.where(mask, self.prior.mean[0], self.prior.mean[1])
-        
-        # Variance: Var[x | ξ] = E[Var[x | θ, ξ]] + Var[E[x | θ, ξ]]
-        #                      = σ²_mask + Var[θ_mask]
-        prior_vars = jnp.diag(self.prior.cov)
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        var = jnp.where(
-            mask,
-            obs_vars[0] + prior_vars[0],
-            obs_vars[1] + prior_vars[1]
+        trials = self.likelihood.get_trials(design)
+        x = jnp.asarray(x, dtype=jnp.float32)
+
+        return Beta(
+            delta=self.prior.delta + x,
+            gamma=self.prior.gamma + trials - x
         )
-        
-        return Gaussian(mean=mean, cov=jnp.diag(var))
-    
-    def get_posterior_predictive(self, posterior: Gaussian, design_new: Array) -> Gaussian:
+
+    def get_prior_predictive(self, design: Array) -> BetaBinomial:
         """
-        Compute posterior predictive distribution p(x_new | x, ξ, ξ_new).
-        
-        Given a posterior p(θ | x, ξ), compute the predictive distribution
-        for new observations at new design points.
-        
-        Args:
-            posterior: Posterior distribution p(θ | x, ξ)
-            design_new: New design (number of participants in group 0)
-            
-        Returns:
-            Gaussian distribution
+        Compute prior predictive p(x | ξ).
+        Returns a BetaBinomial distribution.
         """
-        # Mean: E[x_new | x, ξ, ξ_new] = E[θ_mask]_posterior
-        mask = self.likelihood._group_mask(design_new)
-        mean = jnp.where(mask, posterior.mean[0], posterior.mean[1])
-        
-        # Variance: Var[x_new | x, ξ, ξ_new] = σ²_mask + Var[θ_mask]_posterior
-        posterior_vars = jnp.diag(posterior.cov)
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        var = jnp.where(
-            mask,
-            obs_vars[0] + posterior_vars[0],
-            obs_vars[1] + posterior_vars[1]
+        trials = self.likelihood.get_trials(design)
+        return BetaBinomial(
+            trials=trials,
+            delta=self.prior.delta,
+            gamma=self.prior.gamma
         )
-        
-        return Gaussian(mean=mean, cov=jnp.diag(var))
-    
+
+    def get_posterior_predictive(self, posterior: Beta, design: Array) -> BetaBinomial:
+        """
+        Compute posterior predictive p(x_new | x, ξ, ξ_new).
+        This is a BetaBinomial parameterized by the posterior parameters.
+        """
+        trials = self.likelihood.get_trials(design)
+        return BetaBinomial(
+            trials=trials,
+            delta=posterior.delta,
+            gamma=posterior.gamma
+        )
+
     # =========================================================================
-    # Robust Inference (α < 1)
+    # Robust Inference
     # =========================================================================
-    
-    def get_tilted_marginal(self, design: Array, alpha: float) -> Gaussian:
+
+    def get_tilted_posterior(self, x: Array, design: Array, alpha: Array) -> Beta:
         """
-        Compute α-tilted marginal distribution p_α(x | ξ).
-        
-        Used for computing Sibson's α-mutual information.
-        
+        Compute α-tilted posterior q*(θ | x, ξ) ∝ p(θ) p(x | θ, ξ)^α.
+
         Args:
-            design: Number of participants in group 0
-            alpha: Misspecification order α ∈ (0, 1)
-            
+            x: Observations [x_a, x_b], shape (2,)
+            design: Number of participants in group A
+            alpha: Misspecification order α ∈ (0, 1]
+
         Returns:
-            Gaussian distribution
+            Beta α-tilted posterior distribution
         """
-        # Mean is unchanged
-        mask = self.likelihood._group_mask(design)
-        mean = jnp.where(mask, self.prior.mean[0], self.prior.mean[1])
-        
-        # Variance: Var_α[x | ξ] = σ²_mask/α + Var[θ_mask]
-        prior_vars = jnp.diag(self.prior.cov)
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        var = jnp.where(
-            mask,
-            obs_vars[0] / alpha + prior_vars[0],
-            obs_vars[1] / alpha + prior_vars[1]
+        trials = self.likelihood.get_trials(design)
+        x = jnp.asarray(x, dtype=jnp.float32)
+
+        return Beta(
+            delta=self.prior.delta + alpha * x,
+            gamma=self.prior.gamma + alpha * (trials - x)
         )
-        
-        return Gaussian(mean=mean, cov=jnp.diag(var))
-    
-    def get_tilted_posterior(self, x: Array, design: Array, alpha: float) -> Gaussian:
+
+    def get_tilted_marginal(self, design: Array, alpha: Array) -> TiltedBetaBinomial:
         """
-        Compute α-tilted posterior distribution q*(θ | x, ξ).
-        
-        q*(θ | x, ξ) ∝ p(θ) p(x | θ, ξ)^α
-        
-        Args:
-            x: Observations, shape (num_participants,)
-            design: Number of participants in group 0
-            alpha: Misspecification order α ∈ (0, 1)
-            
-        Returns:
-            Gaussian α-tilted posterior distribution
+        Compute α-tilted marginal p_α(x | ξ).
+        Returns a TiltedBetaBinomial distribution object.
         """
-        design = jnp.asarray(design, dtype=jnp.int32)
-        design = jnp.clip(design, 0, self.likelihood.num_participants)
-        
-        # Group assignments
-        mask = self.likelihood._group_mask(design)
-        n_group0 = design
-        n_group1 = self.likelihood.num_participants - design
-        
-        # Prior parameters
-        prior_means = self.prior.mean
-        prior_vars = jnp.diag(self.prior.cov)
-        
-        # Observation variances
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        # Tilted posterior variances
-        posterior_var0 = 1.0 / (1.0 / prior_vars[0] + alpha * n_group0 / obs_vars[0])
-        posterior_var1 = 1.0 / (1.0 / prior_vars[1] + alpha * n_group1 / obs_vars[1])
-        
-        # Sum of observations in each group
-        sum_group0 = jnp.sum(x * mask)
-        sum_group1 = jnp.sum(x * (~mask))
-        
-        # Tilted posterior means
-        posterior_mean0 = posterior_var0 * (prior_means[0] / prior_vars[0] + alpha * sum_group0 / obs_vars[0])
-        posterior_mean1 = posterior_var1 * (prior_means[1] / prior_vars[1] + alpha * sum_group1 / obs_vars[1])
-        
-        posterior_mean = jnp.array([posterior_mean0, posterior_mean1])
-        posterior_cov = jnp.diag(jnp.array([posterior_var0, posterior_var1]))
-        
-        return Gaussian(mean=posterior_mean, cov=posterior_cov)
-    
-    def get_tilted_joint(self, design: Array, alpha: float) -> Gaussian:
-        """
-        Compute α-tilted joint distribution q*(θ, x | ξ).
-        
-        Returns a Gaussian over the augmented space [θ, x].
-        
-        Args:
-            design: Number of participants in group 0
-            alpha: Misspecification order α ∈ (0, 1)
-            
-        Returns:
-            Gaussian α-tilted joint distribution over [θ, x]
-        """
-        # Group mask
-        mask = self.likelihood._group_mask(design)
-        
-        # Prior parameters
-        prior_means = self.prior.mean
-        prior_cov = self.prior.cov
-        
-        # Observation parameters
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        # Mean: [θ, x]
-        x_mean = jnp.where(mask, prior_means[0], prior_means[1])
-        mean = jnp.concatenate([prior_means, x_mean])
-        
-        # Covariance blocks
-        # Cov[θ, θ] = Σ_prior
-        theta_cov = prior_cov
-        
-        # Cov[θ, x]: each x_i has covariance with its corresponding θ_g
-        # If x_i is in group 0: Cov[θ, x_i] = [Var[θ_0], 0]
-        # If x_i is in group 1: Cov[θ, x_i] = [0, Var[θ_1]]
-        prior_vars = jnp.diag(prior_cov)
-        theta_x_cov = jnp.zeros((2, self.likelihood.num_participants))
-        theta_x_cov = theta_x_cov.at[0, :].set(jnp.where(mask, prior_vars[0], 0.0))
-        theta_x_cov = theta_x_cov.at[1, :].set(jnp.where(mask, 0.0, prior_vars[1]))
-        
-        # Cov[x, x]: diagonal with group-specific inflated variances
-        x_var = jnp.where(
-            mask,
-            obs_vars[0] / alpha + prior_vars[0],
-            obs_vars[1] / alpha + prior_vars[1]
+        trials = self.likelihood.get_trials(design)
+        return TiltedBetaBinomial(
+            trials=trials,
+            delta=self.prior.delta,
+            gamma=self.prior.gamma,
+            alpha=alpha
         )
-        x_cov = jnp.diag(x_var)
-        
-        # Assemble full covariance
-        cov = jnp.block([
-            [theta_cov,      theta_x_cov],
-            [theta_x_cov.T,  x_cov]
-        ])
-        
-        return Gaussian(mean=mean, cov=cov)
-    
+
+    def sample_tilted_joint(self, rng_key: Array, design: Array, alpha: Array) -> Tuple[Array, Array]:
+        """
+        Sample from the worst-case joint distribution q*(θ, x | ξ).
+
+        1. Sample x ~ p_α(x | ξ) (Tilted Marginal)
+        2. Sample θ ~ q*(θ | x, ξ) (Tilted Posterior)
+        """
+        key_x, key_theta = jr.split(rng_key)
+
+        # 1. Sample x from tilted marginal
+        marginal = self.get_tilted_marginal(design, alpha)
+        x = marginal.sample(key_x)
+
+        # 2. Sample theta from tilted posterior conditioned on x
+        posterior = self.get_tilted_posterior(x, design, alpha)
+        theta = posterior.sample(key_theta)
+
+        return theta, x
+
     # =========================================================================
     # Information Measures
     # =========================================================================
-    
-    def shannon_mi(self, design: Array) -> float:
+
+    def shannon_mi(self, design: Array) -> Array:
         """
         Compute Shannon's mutual information I(θ; x | ξ).
-        
-        For independent observations within groups:
-        I(θ; x | ξ) = 0.5 * [log(1 + Var[θ_0] * n_0 / σ²_0) + log(1 + Var[θ_1] * n_1 / σ²_1)]
-        
-        Args:
-            design: Number of participants in group 0
-            
-        Returns:
-            Shannon's mutual information in nats
         """
-        design = jnp.asarray(design, dtype=jnp.int32)
-        design = jnp.clip(design, 0, self.likelihood.num_participants)
-        
-        n_group0 = design
-        n_group1 = self.likelihood.num_participants - design
-        
-        # Prior variances and observation variances
-        prior_vars = jnp.diag(self.prior.cov)
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        # Exact MI: log(1 + signal-to-noise ratio)
-        # Note: n_group is INSIDE the log (scales the SNR, not the MI)
-        term0 = jnp.log(1.0 + prior_vars[0] * n_group0 / obs_vars[0])
-        term1 = jnp.log(1.0 + prior_vars[1] * n_group1 / obs_vars[1])
-        
-        return 0.5 * (term0 + term1)
-    
-    def sibson_mi(self, design: Array, alpha: float) -> float:
+        trials = self.likelihood.get_trials(design)
+        n_a, n_b = trials[0], trials[1]
+        max_n = self.likelihood.num_participants
+
+        def _group_shannon_mi(n, d, g):
+            k_vals = jnp.arange(max_n + 1, dtype=jnp.float32)
+            mask = (k_vals <= n) & (k_vals >= 0)
+
+            # log p(x) for Beta-Binomial
+            safe_n_minus_k = jnp.maximum(0, n - k_vals)
+            log_px = (
+                gammaln(n + 1) - gammaln(k_vals + 1) - gammaln(safe_n_minus_k + 1)
+                + betaln(d + k_vals, g + safe_n_minus_k) - betaln(d, g)
+            )
+            px = jnp.where(mask, jnp.exp(log_px), 0.0)
+
+            # D_KL( Beta(d+x, g+n-x) || Beta(d, g) )
+            d_post = d + k_vals
+            g_post = g + n - k_vals
+
+            # Use safe values for the evaluation branch to avoid NaNs from digamma/betaln
+            # for k_vals outside the support [0, n], which are then masked out.
+            safe_d_post = jnp.where(mask, d_post, 1.0)
+            safe_g_post = jnp.where(mask, g_post, 1.0)
+            safe_total_post = safe_d_post + safe_g_post
+
+            # KL divergence for Beta distributions
+            kl = (
+                betaln(d, g) - betaln(safe_d_post, safe_g_post) +
+                (d_post - d) * (digamma(safe_d_post) - digamma(safe_total_post)) +
+                (g_post - g) * (digamma(safe_g_post) - digamma(safe_total_post))
+            )
+
+            return jnp.sum(jnp.where(mask, px * kl, 0.0))
+
+        mi_a = _group_shannon_mi(n_a, self.prior.delta[0], self.prior.gamma[0])
+        mi_b = _group_shannon_mi(n_b, self.prior.delta[1], self.prior.gamma[1])
+        return mi_a + mi_b
+
+    def sibson_mi(self, design: Array, alpha: Array) -> Array:
         """
         Compute Sibson's α-mutual information I^S_α(θ; x | ξ).
-        
-        Robust generalization of Shannon MI for α ∈ (0, 1).
-        
-        For independent observations within groups:
-        I^S_α = 0.5 * [log(1 + α * Var[θ_0] * n_0 / σ²_0) + log(1 + α * Var[θ_1] * n_1 / σ²_1)]
-        
-        Args:
-            design: Number of participants in group 0
-            alpha: Misspecification order α ∈ (0, 1)
-            
-        Returns:
-            Sibson's α-mutual information in nats
         """
-        design = jnp.asarray(design, dtype=jnp.int32)
-        design = jnp.clip(design, 0, self.likelihood.num_participants)
-        
-        n_group0 = design
-        n_group1 = self.likelihood.num_participants - design
-        
-        # Prior variances and observation variances
-        prior_vars = jnp.diag(self.prior.cov)
-        obs_vars = self.likelihood.observation_std_devs ** 2
-        
-        # Exact MI: log(1 + signal-to-noise ratio)
-        # Note: n_group is INSIDE the log (scales the SNR, not the MI)
-        term0 = jnp.log(1.0 + alpha * prior_vars[0] * n_group0 / obs_vars[0])
-        term1 = jnp.log(1.0 + alpha * prior_vars[1] * n_group1 / obs_vars[1])
-        
-        return 0.5 * (term0 + term1)
-    
-    # Backward compatibility aliases
-    shannon_mutual_information = shannon_mi
-    sibson_alpha_mutual_information = sibson_mi
-    
-    def shannon_ig(self, x: Array, design: Array) -> float:
+        # Handle alpha near 1.0 stably by returning Shannon MI
+        is_shannon = jnp.abs(alpha - 1.0) < 1e-4
+
+        def _sibson_mi():
+            # Clip alpha to avoid exactly 1.0 and 0.0
+            safe_alpha = jnp.clip(alpha, 1e-6, 1.0 - 1e-3)
+            trials = self.likelihood.get_trials(design)
+            n_a, n_b = trials[0], trials[1]
+            max_n = self.likelihood.num_participants
+
+            marginal = self.get_tilted_marginal(design, safe_alpha)
+
+            log_norm_a = marginal._compute_log_normalizer(n_a, self.prior.delta[0], self.prior.gamma[0], max_n=max_n)
+            log_norm_b = marginal._compute_log_normalizer(n_b, self.prior.delta[1], self.prior.gamma[1], max_n=max_n)
+
+            return safe_alpha / (safe_alpha - 1.0) * (log_norm_a + log_norm_b)
+
+        return jnp.where(is_shannon, self.shannon_mi(design), _sibson_mi())
+
+    def shannon_ig(self, x: Array, design: Array) -> Array:
         """
-        Compute expected information gain for a specific observation.
-        
-        EIG(x, ξ) = D_KL(p(θ | x, ξ) || p(θ))
-        
+        Compute information gain for a specific observation.
+
         Args:
-            x: Specific observation, shape (num_participants,)
-            design: Number of participants in group 0
-            
+            x: Specific observation [x_a, x_b], shape (2,)
+            design: Number of participants in group A
+
         Returns:
             Information gain in nats
         """
         posterior = self.get_bayes_posterior(x, design)
         return posterior.kl_to(self.prior)
-    
-    def renyi_ig(self, x: Array, design: Array, alpha: float) -> float:
+
+    def renyi_ig(self, x: Array, design: Array, alpha: Array) -> Array:
         """
-        Compute robust information gain (Rényi divergence).
-        
-        G_α(x, ξ) = D_α(q*(θ | x, ξ) || p(θ))
-        
-        Uses the α-tilted posterior q*(θ | x, ξ).
-        
+        Compute robust information gain G_α(x, ξ).
+
         Args:
-            x: Specific observation, shape (num_participants,)
-            design: Number of participants in group 0
-            alpha: Misspecification order α ∈ (0, 1)
-            
+            x: Specific observation [x_a, x_b], shape (2,)
+            design: Number of participants in group A
+            alpha: Misspecification order α ∈ (0, 1]
+
         Returns:
-            Rényi divergence in nats
+            Robust information gain in nats
         """
         posterior = self.get_tilted_posterior(x, design, alpha)
         return posterior.renyi_to(self.prior, alpha)
-    
-    def optimal_design_shannon(self) -> int:
-        """
-        Find the optimal design that maximizes Shannon's mutual information.
-        
-        Returns:
-            Optimal number of participants to assign to group 0
-        """
+
+    # =========================================================================
+    # Design Optimization
+    # =========================================================================
+
+    def optimal_design_shannon(self) -> Array:
+        """Find design that maximizes Shannon MI."""
         designs = jnp.arange(self.likelihood.num_participants + 1)
         mi_values = jax.vmap(self.shannon_mi)(designs)
-        return int(jnp.argmax(mi_values))
-    
-    def optimal_design_sibson(self, alpha: float) -> int:
-        """
-        Find the optimal design that maximizes Sibson's α-mutual information.
-        
-        Args:
-            alpha: Misspecification order α ∈ (0, 1)
-            
-        Returns:
-            Optimal number of participants to assign to group 0
-        """
+        return jnp.argmax(mi_values)
+
+    def optimal_design_sibson(self, alpha: Array) -> Array:
+        """Find design that maximizes Sibson MI."""
         designs = jnp.arange(self.likelihood.num_participants + 1)
         mi_values = jax.vmap(lambda d: self.sibson_mi(d, alpha))(designs)
-        return int(jnp.argmax(mi_values))
+        return jnp.argmax(mi_values)

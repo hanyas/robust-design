@@ -13,7 +13,7 @@ import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
-from scipy.stats import chi2
+from scipy.stats import chi2   # chi2.ppf is not supported in JAX
 
 from rdesign.distributions import Gaussian
 from rdesign.linear_regression import LinearGaussian, LinearRegression
@@ -94,12 +94,10 @@ def compute_calibration_curve(
     coverage_levels: Array,
     dim: int,
 ) -> Array:
-    """Compute actual coverage at different credible levels."""
-    coverages = []
-    for level in coverage_levels:
-        coverage = compute_credible_coverage(mahalanobis_distances, level, dim)
-        coverages.append(coverage)
-    return jnp.array(coverages)
+    """Compute actual coverage at different credible levels."""    
+    # Pre-compute thresholds using scipy outside of JAX transformations
+    thresholds = chi2.ppf(coverage_levels, df=dim)
+    return jax.vmap(lambda t: jnp.mean(mahalanobis_distances <= t))(thresholds)
 
 
 def generate_uniform_design(rng_key: Array, num_designs: int) -> Array:
@@ -108,7 +106,7 @@ def generate_uniform_design(rng_key: Array, num_designs: int) -> Array:
 
 
 def generate_optimal_design(num_designs: int) -> Array:
-    """Generate optimized design: alternating -1 and 1."""
+    """Generate optimal design: alternating -1 and 1."""
     return jnp.array([(-1.0)**(i+1) for i in range(num_designs)])
 
 
@@ -125,8 +123,8 @@ alpha_robust = 1e-2   # Robust model
 alpha_nominal = 1.0   # Nominal model
 
 # Experiment parameters
-num_designs = 10      # Number of designs
-num_trials = 10_000   # Number of trials
+num_designs = 10       # Number of designs
+num_trials = 100_000   # Number of trials
 
 # Prior
 dim_theta = 2
@@ -147,79 +145,54 @@ print("=" * 80)
 print(f"TRUE PROCESS: Student-t with df={df_true}")
 print(f"  Noise: σ² = {noise_stddev**2}")
 print(f"\nMODELS: LinearGaussian")
-print(f"  Noise: constant σ² = {noise_stddev**2}")
-print(f"\nDesign points:                 {num_designs}")
-print(f"Number of trials:              {num_trials}")
-print(f"\nModel specifications:")
-print(f"  Nominal (α={alpha_nominal:.1f}):    assumes Gaussian noise")
-print(f"  Robust (α={alpha_robust:.2f}):   robust to model misspecification")
+print(f"  Nominal α={alpha_nominal:.1f}:    Standard Bayesian Update")
+print(f"  Robust  α={alpha_robust:.2f}:    Tilted Posterior")
+print(f"\nDesign points:     {num_designs}")
+print(f"Number of trials:    {num_trials}")
+print("=" * 80)
 
 # ============================================================================
 # RUN EXPERIMENTS
 # ============================================================================
-print("\n" + "=" * 80)
-print("RUNNING EXPERIMENTS")
-print("=" * 80)
-
-
-# Storage for results
-mahal_opt_nominal = []
-mahal_opt_robust = []
-mahal_rand_nominal = []
-mahal_rand_robust = []
-
-# Sample from prior and evaluate calibration
 print(f"\nRunning {num_trials} trials...")
-for i in range(num_trials):
-    if (i + 1) % 1000 == 0:
-        print(f"  Trial {i + 1}/{num_trials}...")
 
-    rng_key, key_theta, key_design_rand, key_obs_opt, key_obs_rand = jr.split(rng_key, 5)
+# Generate optimized design once
+xi_optimal = generate_optimal_design(num_designs)
+
+def run_single_trial(rng_key):
+    key_theta, key_design_rand, key_obs_opt, key_obs_rand = jr.split(rng_key, 4)
 
     # Sample true parameter from prior
     theta_true = prior.sample(key_theta, 1)[0]
 
     # ========== OPTIMIZED DESIGN ==========
-    # Generate optimized design
-    xi_optimal = generate_optimal_design(num_designs)
-
-    # Generate data from TRUE Student-t process
     y_optimal = process.sample(key_obs_opt, xi_optimal, theta_true)
-
-    # Compute posteriors: nominal and robust
     posterior_opt_nominal = linreg.get_tilted_posterior(y_optimal, xi_optimal, alpha_nominal)
     posterior_opt_robust = linreg.get_tilted_posterior(y_optimal, xi_optimal, alpha_robust)
 
-    # Compute Mahalanobis distances
-    mahal_opt_nom = compute_mahalanobis_distance(theta_true, posterior_opt_nominal.mean, posterior_opt_nominal.cov)
-    mahal_opt_rob = compute_mahalanobis_distance(theta_true, posterior_opt_robust.mean, posterior_opt_robust.cov)
-
-    mahal_opt_nominal.append(mahal_opt_nom)
-    mahal_opt_robust.append(mahal_opt_rob)
-
     # ========== Uniform DESIGN ==========
-    # Generate random design
     xi_uniform = generate_uniform_design(key_design_rand, num_designs)
-
-    # Generate data from TRUE Student-t process
     y_uniform = process.sample(key_obs_rand, xi_uniform, theta_true)
-
-    # Compute posteriors: nominal and robust
     posterior_rand_nominal = linreg.get_tilted_posterior(y_uniform, xi_uniform, alpha_nominal)
     posterior_rand_robust = linreg.get_tilted_posterior(y_uniform, xi_uniform, alpha_robust)
 
     # Compute Mahalanobis distances
-    mahal_rand_nom = compute_mahalanobis_distance(theta_true, posterior_rand_nominal.mean, posterior_rand_nominal.cov)
-    mahal_rand_rob = compute_mahalanobis_distance(theta_true, posterior_rand_robust.mean, posterior_rand_robust.cov)
+    return jnp.array([
+        compute_mahalanobis_distance(theta_true, posterior_opt_nominal.mean, posterior_opt_nominal.cov),
+        compute_mahalanobis_distance(theta_true, posterior_opt_robust.mean, posterior_opt_robust.cov),
+        compute_mahalanobis_distance(theta_true, posterior_rand_nominal.mean, posterior_rand_nominal.cov),
+        compute_mahalanobis_distance(theta_true, posterior_rand_robust.mean, posterior_rand_robust.cov)
+    ])
 
-    mahal_rand_nominal.append(mahal_rand_nom)
-    mahal_rand_robust.append(mahal_rand_rob)
+# Batch run all trials
+trial_keys = jr.split(rng_key, num_trials)
+results = jax.jit(jax.vmap(run_single_trial))(trial_keys)
 
-# Convert to arrays
-mahal_opt_nominal = jnp.array(mahal_opt_nominal)
-mahal_opt_robust = jnp.array(mahal_opt_robust)
-mahal_rand_nominal = jnp.array(mahal_rand_nominal)
-mahal_rand_robust = jnp.array(mahal_rand_robust)
+# Extract results
+mahal_opt_nominal = results[:, 0]
+mahal_opt_robust = results[:, 1]
+mahal_rand_nominal = results[:, 2]
+mahal_rand_robust = results[:, 3]
 
 print(f"Completed {num_trials} trials")
 
@@ -253,43 +226,42 @@ print("Computed calibration curves")
 # RESULTS
 # ============================================================================
 print("\n" + "=" * 80)
-print("RESULTS")
+print("RESULTS: 95% Credible Region Coverage")
 print("=" * 80)
 
-print("\n" + "-" * 80)
-print("OPTIMIZED DESIGN")
-print("-" * 80)
-print(f"Mahalanobis distance M² (expected: {dim_theta:.0f} for well-calibrated):")
-print(f"  Nominal (α={alpha_nominal:.1f}):     {jnp.mean(mahal_opt_nominal):.2f} ± {jnp.std(mahal_opt_nominal):.2f}  ({jnp.mean(mahal_opt_nominal)/dim_theta:.2f}× expected)")
-print(f"  Robust (α={alpha_robust:.2f}):   {jnp.mean(mahal_opt_robust):.2f} ± {jnp.std(mahal_opt_robust):.2f}  ({jnp.mean(mahal_opt_robust)/dim_theta:.2f}× expected)")
+print("\nOPTIMIZED DESIGN")
+print("-" * 30)
+print(f"  Nominal α={alpha_nominal:.1f}:     {100*coverage_95_opt_nominal:.1f}%")
+print(f"  Robust  α={alpha_robust:.2f}:     {100*coverage_95_opt_robust:.1f}%")
 
-print(f"\n95% credible region coverage (expected: 95.0%):")
-print(f"  Nominal (α={alpha_nominal:.1f}):     {100*coverage_95_opt_nominal:.1f}%  {'✗ under-coverage' if coverage_95_opt_nominal < 0.94 else '✓'}")
-print(f"  Robust (α={alpha_robust:.2f}):   {100*coverage_95_opt_robust:.1f}%  {'✓ good coverage' if 0.94 <= coverage_95_opt_robust <= 0.96 else '• over-coverage' if coverage_95_opt_robust > 0.96 else '✗ under-coverage'}")
+print("\nRANDOM DESIGN")
+print("-" * 30)
+print(f"  Nominal α={alpha_nominal:.1f}:     {100*coverage_95_rand_nominal:.1f}%")
+print(f"  Robust  α={alpha_robust:.2f}:     {100*coverage_95_rand_robust:.1f}%")
 
-print("\n" + "-" * 80)
-print("RANDOM DESIGN")
-print("-" * 80)
-print(f"Mahalanobis distance M² (expected: {dim_theta:.0f} for well-calibrated):")
-print(f"  Nominal (α={alpha_nominal:.1f}):     {jnp.mean(mahal_rand_nominal):.2f} ± {jnp.std(mahal_rand_nominal):.2f}  ({jnp.mean(mahal_rand_nominal)/dim_theta:.2f}× expected)")
-print(f"  Robust (α={alpha_robust:.2f}):   {jnp.mean(mahal_rand_robust):.2f} ± {jnp.std(mahal_rand_robust):.2f}  ({jnp.mean(mahal_rand_robust)/dim_theta:.2f}× expected)")
+# ============================================================================
+# COMPARISON TABLE
+# ============================================================================
+table_levels = jnp.linspace(0.1, 1.0, 10)
+print("\nCOVERAGE COMPARISON TABLE")
+print("-" * 115)
+print(f"{'Design':<18} | " + " | ".join([f"{l:8.1f}" for l in table_levels]))
+print("-" * 115)
 
-print(f"\n95% credible region coverage (expected: 95.0%):")
-print(f"  Nominal (α={alpha_nominal:.1f}):     {100*coverage_95_rand_nominal:.1f}%  {'✗ under-coverage' if coverage_95_rand_nominal < 0.94 else '✓'}")
-print(f"  Robust (α={alpha_robust:.2f}):   {100*coverage_95_rand_robust:.1f}%  {'✓ good coverage' if 0.94 <= coverage_95_rand_robust <= 0.96 else '• over-coverage' if coverage_95_rand_robust > 0.96 else '✗ under-coverage'}")
+# Robust evaluations
+rob_opt_covs = [compute_credible_coverage(mahal_opt_robust, l, dim_theta) for l in table_levels]
+rob_rand_covs = [compute_credible_coverage(mahal_rand_robust, l, dim_theta) for l in table_levels]
 
-print("\n" + "-" * 80)
-print("KEY INSIGHT: MODEL MISSPECIFICATION")
-print("-" * 80)
-print(f"With Student-t true process (df={df_true}, heavy tails):")
-print(f"  • Nominal Gaussian model is MISSPECIFIED")
-print(f"    - Underestimates uncertainty from heavy tails")
-print(f"    - Optimized design M² = {jnp.mean(mahal_opt_nominal):.2f} >> {dim_theta} (overconfident)")
-print(f"    - Optimized design coverage = {100*coverage_95_opt_nominal:.1f}% << 95% (under-coverage)")
-print(f"\n  • Robust model (α={alpha_robust:.2f}) provides ROBUSTNESS")
-print(f"    - Inflates uncertainty to account for misspecification")
-print(f"    - Optimized design M² = {jnp.mean(mahal_opt_robust):.2f} ≈ {dim_theta} (better calibrated)")
-print(f"    - Optimized design coverage = {100*coverage_95_opt_robust:.1f}% ≈ 95% (good coverage)")
+# Nominal evaluations
+nom_opt_covs = [compute_credible_coverage(mahal_opt_nominal, l, dim_theta) for l in table_levels]
+nom_rand_covs = [compute_credible_coverage(mahal_rand_nominal, l, dim_theta) for l in table_levels]
+
+print(f"{'Robust + Optimal':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in rob_opt_covs]))
+print(f"{'Robust + Uniform':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in rob_rand_covs]))
+print("-" * 115)
+print(f"{'Nominal + Optimal':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in nom_opt_covs]))
+print(f"{'Nominal + Uniform':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in nom_rand_covs]))
+print("-" * 115)
 
 print("\n" + "=" * 80)
 

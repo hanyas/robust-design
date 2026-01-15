@@ -12,7 +12,6 @@ import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
-from jax.scipy import special
 
 from rdesign.distributions import Gaussian
 from rdesign.linear_regression import LinearGaussian, LinearRegression
@@ -114,12 +113,12 @@ print("=" * 80)
 print(f"TRUE PROCESS: Student-t with df={df_true}")
 print(f"  Noise: σ² = {noise_stddev**2:.4f}")
 print(f"\nMODEL: LinearGaussian")
-print(f"  α-tilted posterior: q(θ|x) ∝ p(θ) p(x|θ)^α")
-print(f"  α-inflated predictive: σ²/α")
+print(f"  Robust learning:   q(θ|x) ∝ p(θ) p(x|θ)^α")
+print(f"  Robust prediction: σ²/α")
 print(f"\nDesign points:     {num_design_points}")
-print(f"Test points:         {num_test_points}")
-print(f"Number of trials:    {num_trials}")
-print(f"Alpha values:        {num_alphas}")
+print(f"Test points:       {num_test_points}")
+print(f"Number of trials:  {num_trials}")
+print("=" * 80)
 
 # ============================================================================
 # Run Experiments
@@ -157,7 +156,7 @@ for trial in range(num_trials):
     # ========== TEST POINT ==========
     rng_key, sub_keys = custom_split(rng_key, num_test_points + 1)
     xi_test = jax.vmap(lambda k: generate_uniform_design(k, num_design_points))(sub_keys)
-    
+
     # Sample test observations for each test design
     rng_key, sub_keys = custom_split(rng_key, num_test_points + 1)
     y_test = jax.vmap(lambda k, xi: process.sample(k, xi, theta_true))(sub_keys, xi_test)
@@ -169,15 +168,15 @@ for trial in range(num_trials):
         log_preds_opt = jax.vmap(
             lambda xi_i, y_i: linreg.get_posterior_predictive(posterior_opt, xi_i, alpha).logpdf(y_i)
         )(xi_test, y_test)
-        
+
         # Uniform design
         posterior_unif = linreg.get_tilted_posterior(y_uniform, xi_uniform, alpha)
         log_preds_unif = jax.vmap(
             lambda xi_i, y_i: linreg.get_posterior_predictive(posterior_unif, xi_i, alpha).logpdf(y_i)
         )(xi_test, y_test)
-        
+
         return jnp.mean(log_preds_opt), jnp.mean(log_preds_unif)
-    
+
     elpds_opt, elpds_unif = jax.vmap(evaluate_alpha)(alpha_values)
     elpd_optimal = elpd_optimal.at[:, trial].set(elpds_opt)
     elpd_uniform = elpd_uniform.at[:, trial].set(elpds_unif)
@@ -189,7 +188,7 @@ print("✓ Complete")
 # ============================================================================
 
 print("\n" + "=" * 80)
-print("RESULTS")
+print("RESULTS: ELPD across α")
 print("=" * 80)
 
 # Statistics
@@ -198,9 +197,6 @@ std_elpd_opt = jnp.std(elpd_optimal, axis=1)
 mean_elpd_unif = jnp.mean(elpd_uniform, axis=1)
 std_elpd_unif = jnp.std(elpd_uniform, axis=1)
 
-print("\n" + "-" * 80)
-print("ELPD AT SELECTED α VALUES")
-print("-" * 80)
 print(f"\n{'α':>8} | {'Optimal':>20} | {'Uniform':>20}")
 print("-" * 55)
 for alpha_target in [0.01, 0.05, 0.1, 0.2, 0.5, 1.0]:

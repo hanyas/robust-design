@@ -5,8 +5,6 @@ This module implements a conjugate linear regression model with support for:
 - Standard Bayesian inference (prior, likelihood, posterior)
 - Robust experimental design using Sibson's α-mutual information
 - Worst-case generative processes under model misspecification
-
-The design follows the Protocol pattern from base.py with separate Gaussian prior and LinearGaussian likelihood objects.
 """
 
 from typing import NamedTuple
@@ -41,12 +39,12 @@ class LinearGaussian(NamedTuple):
         size = design.shape[0]
         return jnp.column_stack([design, jnp.ones(size)])
 
-    def sample(self, key: Array, design: Array, theta: Array) -> Array:
+    def sample(self, rng_key: Array, design: Array, theta: Array) -> Array:
         """
         Sample from the likelihood p(x | θ, ξ).
 
         Args:
-            key: Random key
+            rng_key: Random key
             design: Design points, shape (N,)
             theta: Parameters, shape (2,)
 
@@ -55,7 +53,7 @@ class LinearGaussian(NamedTuple):
         """
         mean = self.mean(design, theta)
         cov = self.cov(design)
-        return jr.multivariate_normal(key, mean, cov)
+        return jr.multivariate_normal(rng_key, mean, cov)
 
     def logpdf(self, x: Array, design: Array, theta: Array) -> Array:
         """
@@ -171,8 +169,9 @@ class LinearRegression(NamedTuple):
         Compute posterior predictive distribution p(x_new | x, ξ, ξ_new).
 
         Args:
-            posterior: Posterior distribution p(θ | x, ξ)
+            posterior: Posterior distribution
             design: Design points ξ, shape (N,)
+            alpha: Misspecification order α ∈ (0, 1)
 
         Returns:
             Gaussian distribution
@@ -289,7 +288,7 @@ class LinearRegression(NamedTuple):
             Shannon's mutual information in nats
         """
         size = jnp.atleast_1d(design).shape[0]
-        predictive = self.get_bayes_predictive(design)
+        predictive = self.get_prior_predictive(design)
         log_det_pred = jnp.linalg.slogdet(predictive.cov)[1]
         log_det_noise = size * jnp.log(self.likelihood.noise_stddev**2)
 
