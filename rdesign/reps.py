@@ -9,7 +9,7 @@ from flax.training.train_state import TrainState
 from distrax import Lambda
 
 from rdesign.base import REPSConfig, StepInfo, OptimizationResult
-from rdesign.policy import Policy, GaussianParams, GaussianPolicy
+from rdesign.policy import Policy, GaussianParams
 from rdesign.utils import batch_samples, log_progress, inv_sqrt_schedule
 
 
@@ -44,9 +44,10 @@ def update_policy(
     Returns:
         Tuple of (updated policy state, loss value).
     """
+
     def loss_fn(params):
         log_probs = jax.vmap(lambda s: policy.log_prob(s, params))(samples)
-        return - 1.0 * jnp.sum(weights * log_probs)
+        return -1.0 * jnp.sum(weights * log_probs)
 
     loss, grads = jax.value_and_grad(loss_fn)(policy_state.params)
     policy_state = policy_state.apply_gradients(grads=grads)

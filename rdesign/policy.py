@@ -1,20 +1,16 @@
 from typing import Callable
 
-from jax import Array, numpy as jnp
+from distrax import Bijector, Block, MultivariateNormalDiag, Transformed
 from flax import linen as nn
-
-from distrax import (
-    Bijector,
-    Transformed,
-    MultivariateNormalDiag,
-    Block
-)
+from jax import Array
+from jax import numpy as jnp
 
 from rdesign.base import Policy
 
 
 class GaussianParams(nn.Module):
     """Learnable mean and log_std parameters for a Gaussian distribution."""
+
     dim: int
     init_mean: Callable = nn.initializers.ones
     init_log_std: Callable = nn.initializers.zeros
@@ -29,11 +25,7 @@ class GaussianParams(nn.Module):
 class ParametricGaussian(Policy):
     """Gaussian policy with optional bijector for constrained action spaces."""
 
-    def __init__(
-        self,
-        params_module: GaussianParams,
-        bijector: Bijector
-    ):
+    def __init__(self, params_module: GaussianParams, bijector: Bijector):
         self.params_module = params_module
         self.dim = params_module.dim
         self._bijector = Block(bijector, ndims=1)
