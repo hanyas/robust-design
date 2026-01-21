@@ -14,6 +14,7 @@ from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 from scipy.stats import chi2   # chi2.ppf is not supported in JAX
+import csv
 
 from rdesign.distributions import Gaussian
 from rdesign.linear_regression import LinearGaussian, LinearRegression
@@ -213,6 +214,26 @@ cal_curve_opt_robust = compute_calibration_curve(mahal_opt_robust, coverage_leve
 # Compute calibration curves for random design
 cal_curve_rand_nominal = compute_calibration_curve(mahal_rand_nominal, coverage_levels, dim_theta)
 cal_curve_rand_robust = compute_calibration_curve(mahal_rand_robust, coverage_levels, dim_theta)
+
+# Write plotted data to CSV
+csv_path = "examples/linear_regression/linreg_studentt_coverage.csv"
+with open(csv_path, "w", newline="") as csvfile:
+    writer = csv.writer(csvfile)
+    writer.writerow([
+        "coverage_levels",
+        "cal_curve_opt_nominal",
+        "cal_curve_opt_robust",
+        "cal_curve_rand_nominal",
+        "cal_curve_rand_robust",
+    ])
+    for row in zip(
+        coverage_levels.tolist(),
+        cal_curve_opt_nominal.tolist(),
+        cal_curve_opt_robust.tolist(),
+        cal_curve_rand_nominal.tolist(),
+        cal_curve_rand_robust.tolist(),
+    ):
+        writer.writerow(row)
 
 # 95% coverage for reporting
 coverage_95_opt_nominal = compute_credible_coverage(mahal_opt_nominal, 0.95, dim_theta)

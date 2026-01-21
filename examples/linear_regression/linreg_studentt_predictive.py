@@ -17,6 +17,7 @@ from rdesign.distributions import Gaussian
 from rdesign.linear_regression import LinearGaussian, LinearRegression
 
 import matplotlib.pyplot as plt
+import csv
 
 jax.config.update("jax_enable_x64", True)
 
@@ -216,6 +217,30 @@ q05_opt = jnp.percentile(elpd_optimal, 5, axis=1)
 q95_opt = jnp.percentile(elpd_optimal, 95, axis=1)
 q05_unif = jnp.percentile(elpd_uniform, 5, axis=1)
 q95_unif = jnp.percentile(elpd_uniform, 95, axis=1)
+
+# Save summary statistics for LaTeX plotting
+csv_path = "examples/linear_regression/linreg_studentt_predictive.csv"
+with open(csv_path, "w", newline="") as csv_file:
+    writer = csv.writer(csv_file)
+    writer.writerow([
+        "alpha",
+        "mean_opt",
+        "q05_opt",
+        "q95_opt",
+        "mean_unif",
+        "q05_unif",
+        "q95_unif",
+    ])
+    for idx in range(num_alphas):
+        writer.writerow([
+            float(alpha_values[idx]),
+            float(mean_elpd_opt[idx]),
+            float(q05_opt[idx]),
+            float(q95_opt[idx]),
+            float(mean_elpd_unif[idx]),
+            float(q05_unif[idx]),
+            float(q95_unif[idx]),
+        ])
 
 # Optimal design (dark)
 ax.plot(alpha_values, mean_elpd_opt, '-', color='0.1', lw=2.5, label='Optimal')
