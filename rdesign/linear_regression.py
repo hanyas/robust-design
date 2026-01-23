@@ -309,20 +309,20 @@ class LinearRegression(NamedTuple):
         tilted_marginal = self.get_tilted_marginal(design, alpha)
 
         log_det_tilted = jnp.linalg.slogdet(tilted_marginal.cov)[1]
-        log_det_scaled_noise = size * jnp.log(self.likelihood.noise_stddev**2 / alpha)
+        log_det_scaled_noise = size * jnp.log(self.likelihood.noise_stddev**2)
 
         return 0.5 * (log_det_tilted - log_det_scaled_noise)
 
     def shannon_ig(self, x: Array, design: Array) -> float:
         """
-        Compute expected information gain for a specific observation
+        Compute information gain for a specific observation.
 
         Args:
             x: Specific observation, shape (N,)
             design: Design points, shape (N,)
 
         Returns:
-            Information gain in nats
+            KL divergence from posterior to prior in nats
         """
         posterior = self.get_bayes_posterior(x, design)
         return posterior.kl_to(self.prior)
@@ -339,5 +339,5 @@ class LinearRegression(NamedTuple):
         Returns:
             Rényi divergence in nats
         """
-        posterior = self.get_tilted_posterior(x, design, alpha)
+        posterior = self.get_bayes_posterior(x, design)
         return posterior.renyi_to(self.prior, alpha)

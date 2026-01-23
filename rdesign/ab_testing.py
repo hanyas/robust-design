@@ -45,7 +45,7 @@ class BetaBinomial(NamedTuple):
             betaln(self.delta, self.gamma)
         )
 
-        # Sum over groups (independence)
+        # Sum over groups
         return jnp.sum(jnp.where(self.trials > 0, log_binom + log_beta_ratio, 0.0))
 
     def sample(self, rng_key: Array, shape: tuple = ()) -> Array:
@@ -60,84 +60,106 @@ class BetaBinomial(NamedTuple):
 class TiltedBetaBinomial(NamedTuple):
     """
     α-tilted Marginal distribution p_α(x | ξ).
+    Optimized for JAX with vectorization over groups.
     """
     trials: Array  # shape (2,)
     delta: Array   # shape (2,)
     gamma: Array   # shape (2,)
     alpha: float
+    max_n: int
 
-    def _log_Z_alpha_k(self, x_k: Array, n_k: Array, delta_k: float, gamma_k: float) -> Array:
+    def _log_tilted_kernel(self, k: Array, n: Array, d: Array, g: Array) -> Array:
         """
-        Compute unnormalized log probability term log Z_α(k, n) for a single group.
+        Computes log[ (Binom(n, k)^α * Beta(...) / Beta(...))^(1/α) ].
+        This simplifies to: log_binom(n, k) + (1/α) * log_beta_ratio
         """
-        # Ensure we don't have NaNs by masking
-        mask = (x_k <= n_k) & (x_k >= 0)
-        safe_x = jnp.where(mask, x_k, 0.0)
-        safe_n_minus_x = jnp.where(mask, n_k - x_k, 0.0)
+        # Safe masking for support
+        mask = (k >= 0) & (k <= n)
+        safe_k = jnp.where(mask, k, 0.0)
+        safe_nmk = jnp.where(mask, n - safe_k, 0.0)
 
-        log_binom = (
-            gammaln(n_k + 1)
-            - gammaln(safe_x + 1)
-            - gammaln(safe_n_minus_x + 1)
+        # Log Binomial term
+        log_binom = gammaln(n + 1) - gammaln(safe_k + 1) - gammaln(safe_nmk + 1)
+
+        # Log Beta ratio term
+        # Paper Appendix C.2: B(δ + αx, γ + α(n-x)) / B(δ, γ)
+        log_beta_ratio = (
+            betaln(d + self.alpha * safe_k, g + self.alpha * safe_nmk) -
+            betaln(d, g)
         )
-        log_beta_term = (
-            betaln(delta_k + self.alpha * safe_x, gamma_k + self.alpha * safe_n_minus_x) -
-            betaln(delta_k, gamma_k)
-        )
-        res = self.alpha * log_binom + log_beta_term
-        return jnp.where(mask, res, -jnp.inf)
 
-    def log_pmf(self, x: Array) -> Array:
-        """
-        Compute normalized log p_α(x).
-        """
-        # Calculate unnormalized log probs for the specific x
-        log_Z_a = self._log_Z_alpha_k(x[0], self.trials[0], self.delta[0], self.gamma[0])
-        log_Z_b = self._log_Z_alpha_k(x[1], self.trials[1], self.delta[1], self.gamma[1])
+        # Combine: log(Z^(1/α)) = log(Z) / α
+        # = (α * log_binom + log_beta_ratio) / α
+        # = log_binom + log_beta_ratio / α
+        return jnp.where(mask, log_binom + (log_beta_ratio / self.alpha), -jnp.inf)
 
-        # Calculate partition functions Z_alpha(xi) for normalization
-        # We must sum Z_alpha(k)^(1/alpha) over all possible k
-        # For individual log_pmf we use int(n) as support
-        norm_a = self._compute_log_normalizer(self.trials[0], self.delta[0], self.gamma[0])
-        norm_b = self._compute_log_normalizer(self.trials[1], self.delta[1], self.gamma[1])
+    def log_normalizer(self, n: Array, d: Array, g: Array) -> Array:
+            """
+            Compute log Z_α = log sum_k (p(k|...)^α)^(1/α).
+            Public method required for Sibson MI.
+            """
+            # 1. Create grid of all possible outcomes [0...max_n]
+            k_grid = jnp.arange(self.max_n + 1, dtype=jnp.float32)
 
-        # log p_alpha(x) = (1/alpha) * log Z_alpha(x) - log_normalizer
-        log_prob_a = (1.0 / self.alpha) * log_Z_a - norm_a
-        log_prob_b = (1.0 / self.alpha) * log_Z_b - norm_b
+            # 2. Compute unnormalized kernel for every k
+            # We broadcast n, d, g against the grid k
+            log_kernel = self._log_tilted_kernel(k_grid, n, d, g)
 
-        return log_prob_a + log_prob_b
+            # 3. Sum over k
+            return logsumexp(log_kernel)
 
-    def _compute_log_normalizer(self, n: Array, delta: float, gamma: float, max_n: int = None) -> Array:
-        """Compute log sum_k Z_α(k)^(1/α)."""
-        if max_n is None:
-            # Fallback to concrete support if max_n is not provided
-            # This will fail under vmap if n is a tracer
-            if n <= 0: return jnp.array(0.0)
-            n_int = int(n)
-            k_vals = jnp.arange(n_int + 1, dtype=jnp.float32)
-        else:
-            # JAX-friendly version for vmap
-            k_vals = jnp.arange(max_n + 1, dtype=jnp.float32)
+    def logpmf(self, x: Array) -> Array:
+        """Compute normalized log p_α(x)."""
 
-        log_Z_vals = self._log_Z_alpha_k(k_vals, n, delta, gamma)
-        return logsumexp(log_Z_vals / self.alpha)
+        def standard_logpmf(val):
+            # Standard Beta-Binomial
+            log_binom = gammaln(self.trials + 1) - gammaln(val + 1) - gammaln(self.trials - val + 1)
+            log_beta = betaln(self.delta + val, self.gamma + self.trials - val) - betaln(self.delta, self.gamma)
+            return jnp.sum(jnp.where(self.trials > 0, log_binom + log_beta, 0.0))
+
+        def tilted_logpmf(val):
+            # 1. Compute unnormalized log-probs for the specific x
+            # vmap over groups (trials, delta, gamma) and input x
+            log_unnorm = jax.vmap(self._log_tilted_kernel)(val, self.trials, self.delta, self.gamma)
+
+            # 2. Compute log-normalizers
+            # Grid of all possible outcomes [0...max_n]
+            k_grid = jnp.arange(self.max_n + 1, dtype=jnp.float32)
+            
+            # vmap grid computation over groups
+            # Result shape: (2, max_n+1)
+            log_grid = jax.vmap(lambda n, d, g: self._log_tilted_kernel(k_grid, n, d, g))(
+                self.trials, self.delta, self.gamma
+            )
+            
+            log_Z = logsumexp(log_grid, axis=-1)
+            
+            return jnp.sum(log_unnorm - log_Z)
+
+        # Branch for stability near alpha=1
+        return jax.lax.cond(jnp.abs(self.alpha - 1.0) < 1e-3, standard_logpmf, tilted_logpmf, x)
 
     def sample(self, rng_key: Array) -> Array:
-        """
-        Sample from the discrete tilted marginal.
-        """
-        def sample_single_group(k, n, d, g):
-            if n <= 0: return 0.0
-            k_vals = jnp.arange(int(n) + 1, dtype=jnp.float32)
-            # Unnormalized log probs in the tilted distribution: (1/alpha) * log Z_alpha
-            logits = self._log_Z_alpha_k(k_vals, n, d, g) / self.alpha
-            idx = jr.categorical(k, logits)
-            return idx.astype(jnp.float32)
+        """Sample from the discrete tilted marginal."""
+        
+        def standard_sample(k):
+            key_theta, key_x = jr.split(k)
+            theta = jr.beta(key_theta, self.delta, self.gamma)
+            return jr.binomial(key_x, self.trials.astype(int), theta)
 
-        key_a, key_b = jr.split(rng_key)
-        x_a = sample_single_group(key_a, self.trials[0], self.delta[0], self.gamma[0])
-        x_b = sample_single_group(key_b, self.trials[1], self.delta[1], self.gamma[1])
-        return jnp.array([x_a, x_b])
+        def tilted_sample(k):
+            k_grid = jnp.arange(self.max_n + 1, dtype=jnp.float32)
+            
+            # Helper to sample one group
+            def sample_group(key, n, d, g):
+                logits = self._log_tilted_kernel(k_grid, n, d, g)
+                return jr.categorical(key, logits).astype(jnp.float32)
+
+            # vmap sampling over groups
+            keys = jr.split(k, 2)
+            return jax.vmap(sample_group)(keys, self.trials, self.delta, self.gamma)
+
+        return jax.lax.cond(jnp.abs(self.alpha - 1.0) < 1e-3, standard_sample, tilted_sample, rng_key)
 
 
 class Binomial(NamedTuple):
@@ -199,16 +221,18 @@ class ABTesting(NamedTuple):
             gamma=self.prior.gamma
         )
 
-    def get_posterior_predictive(self, posterior: Beta, design: Array) -> BetaBinomial:
+    def get_posterior_predictive(self, posterior: Beta, design: Array, alpha: float = 1.0) -> BetaBinomial:
         """
         Compute posterior predictive p(x_new | x, ξ, ξ_new).
         This is a BetaBinomial parameterized by the posterior parameters.
         """
         trials = self.likelihood.get_trials(design)
-        return BetaBinomial(
+        return TiltedBetaBinomial(
             trials=trials,
             delta=posterior.delta,
-            gamma=posterior.gamma
+            gamma=posterior.gamma,
+            alpha=alpha,
+            max_n=self.likelihood.num_participants
         )
 
     # =========================================================================
@@ -245,27 +269,9 @@ class ABTesting(NamedTuple):
             trials=trials,
             delta=self.prior.delta,
             gamma=self.prior.gamma,
-            alpha=alpha
+            alpha=alpha,
+            max_n=self.likelihood.num_participants
         )
-
-    def sample_tilted_joint(self, rng_key: Array, design: Array, alpha: Array) -> Tuple[Array, Array]:
-        """
-        Sample from the worst-case joint distribution q*(θ, x | ξ).
-
-        1. Sample x ~ p_α(x | ξ) (Tilted Marginal)
-        2. Sample θ ~ q*(θ | x, ξ) (Tilted Posterior)
-        """
-        key_x, key_theta = jr.split(rng_key)
-
-        # 1. Sample x from tilted marginal
-        marginal = self.get_tilted_marginal(design, alpha)
-        x = marginal.sample(key_x)
-
-        # 2. Sample theta from tilted posterior conditioned on x
-        posterior = self.get_tilted_posterior(x, design, alpha)
-        theta = posterior.sample(key_theta)
-
-        return theta, x
 
     # =========================================================================
     # Information Measures
@@ -295,7 +301,7 @@ class ABTesting(NamedTuple):
             d_post = d + k_vals
             g_post = g + n - k_vals
 
-            # Use safe values for the evaluation branch to avoid NaNs from digamma/betaln
+            # Use safe values to avoid NaNs from digamma/betaln
             # for k_vals outside the support [0, n], which are then masked out.
             safe_d_post = jnp.where(mask, d_post, 1.0)
             safe_g_post = jnp.where(mask, g_post, 1.0)
@@ -316,26 +322,42 @@ class ABTesting(NamedTuple):
 
     def sibson_mi(self, design: Array, alpha: Array) -> Array:
         """
-        Compute Sibson's α-mutual information I^S_α(θ; x | ξ).
+        Compute Sibson's α-mutual information I^S_α(θ; x | ξ).        
         """
-        # Handle alpha near 1.0 stably by returning Shannon MI
-        is_shannon = jnp.abs(alpha - 1.0) < 1e-4
+        
+        trials = self.likelihood.get_trials(design)
+        n_a, n_b = trials[0], trials[1]
+        
+        # 1. Define the log-normalizer as a pure function of alpha
+        def log_normalizer_fn(a):
+            # Re-instantiate marginal with dynamic alpha to trace gradients
+            marginal = self.get_tilted_marginal(design, a)
+            
+            # Compute log Z for both groups
+            lz_a = marginal.log_normalizer(n_a, self.prior.delta[0], self.prior.gamma[0])
+            lz_b = marginal.log_normalizer(n_b, self.prior.delta[1], self.prior.gamma[1])
+            return lz_a + lz_b
 
-        def _sibson_mi():
-            # Clip alpha to avoid exactly 1.0 and 0.0
-            safe_alpha = jnp.clip(alpha, 1e-6, 1.0 - 1e-3)
-            trials = self.likelihood.get_trials(design)
-            n_a, n_b = trials[0], trials[1]
-            max_n = self.likelihood.num_participants
+        # 2. Define the exact Shannon MI as the gradient at 1.0
+        def shannon_via_grad():
+            return jax.grad(log_normalizer_fn)(1.0)
 
-            marginal = self.get_tilted_marginal(design, safe_alpha)
+        # 3. Define the standard Sibson calculation
+        def sibson_standard():
+            # Clip safe_alpha to avoid division by zero in the non-limit branch
+            safe_alpha = jnp.where(jnp.isclose(alpha, 1.0), 0.5, alpha) 
+            log_z = log_normalizer_fn(safe_alpha)
+            return (safe_alpha / (safe_alpha - 1.0)) * log_z
 
-            log_norm_a = marginal._compute_log_normalizer(n_a, self.prior.delta[0], self.prior.gamma[0], max_n=max_n)
-            log_norm_b = marginal._compute_log_normalizer(n_b, self.prior.delta[1], self.prior.gamma[1], max_n=max_n)
-
-            return safe_alpha / (safe_alpha - 1.0) * (log_norm_a + log_norm_b)
-
-        return jnp.where(is_shannon, self.shannon_mi(design), _sibson_mi())
+        # 4. Switch based on proximity to 1.0
+        is_shannon = jnp.isclose(alpha, 1.0, atol=1e-3)
+        
+        return jax.lax.cond(
+            is_shannon,
+            lambda _: shannon_via_grad(),
+            lambda _: sibson_standard(),
+            operand=None
+        )
 
     def shannon_ig(self, x: Array, design: Array) -> Array:
         """
@@ -363,7 +385,7 @@ class ABTesting(NamedTuple):
         Returns:
             Robust information gain in nats
         """
-        posterior = self.get_tilted_posterior(x, design, alpha)
+        posterior = self.get_bayes_posterior(x, design)
         return posterior.renyi_to(self.prior, alpha)
 
     # =========================================================================
