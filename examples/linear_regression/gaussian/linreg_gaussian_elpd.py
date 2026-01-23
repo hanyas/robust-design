@@ -22,46 +22,6 @@ import csv
 jax.config.update("jax_enable_x64", True)
 
 
-class LinearStudentT(NamedTuple):
-    """
-    Student-t linear likelihood for regression.
-
-    Args:
-        df: Degrees of freedom
-        noise_stddev: Noise standard deviation
-    """
-    df: float
-    noise_stddev: float
-
-    def design_matrix(self, design: Array) -> Array:
-        """Construct augmented design matrix H(ξ) = [ξ, 1]."""
-        design = jnp.atleast_1d(design)
-        size = design.shape[0]
-        return jnp.column_stack([design, jnp.ones(size)])
-
-    def mean(self, design: Array, theta: Array) -> Array:
-        """Compute mean H(ξ)θ."""
-        H = self.design_matrix(design)
-        return H @ theta
-
-    def sample(self, rng_key: Array, design: Array, theta: Array) -> Array:
-        """Sample from multivariate Student-t likelihood."""
-        size = design.shape[0]
-        loc = self.mean(design, theta)
-        scale_matrix = self.noise_stddev**2 * jnp.eye(size)
-
-        # Sample via scale mixture of Gaussians
-        rng_key, key1, key2 = jr.split(rng_key, 3)
-        chi2_samples = jr.gamma(key1, self.df / 2, shape=(size,)) * 2
-
-        L = jnp.linalg.cholesky(scale_matrix)
-        z = jr.normal(key2, (size,))
-        normal_samples = loc + L @ z
-
-        scale_factors = jnp.sqrt(self.df / chi2_samples)
-        return loc + (normal_samples - loc) * scale_factors
-
-
 def generate_optimal_design(num_designs: int) -> Array:
     """Generate optimal design: alternating -1 and 1."""
     return jnp.array([(-1.0)**(i+1) for i in range(num_designs)])
@@ -83,36 +43,43 @@ def custom_split(rng_key: Array, num_splits: int) -> Array:
 
 rng_key = jr.PRNGKey(42)
 
-# True process: Student-t
-df_true = 3.0
-noise_stddev = jnp.sqrt(1e-1)
-
 # Alpha values to evaluate
-alpha_values = jnp.logspace(-2, 0, 25)
+decades = 10.0 ** jnp.arange(-2, 0)
+alpha_values = jnp.concatenate([jnp.arange(1, 11) * d for d in decades])
 num_alphas = len(alpha_values)
 
 # Experiment parameters
 num_design_points = 2
 num_test_points = 32
-num_trials = 10_000
+num_trials = 1024
 
-# Prior
-prior_mean = jnp.zeros(2)
-prior_cov = jnp.diag(jnp.array([3.0, 2.0]))  # jnp.eye(2)
+# Noise scale
+dim_theta = 2
+base_stddev = jnp.sqrt(1e-2)
 
-# Create true process (Student-t)
-process = LinearStudentT(df=df_true, noise_stddev=noise_stddev)
+# Create true process
+alpha_true = 5e-1
+
+proc_prior_mean = jnp.array([1.5, -1.5])
+proc_prior_cov = jnp.diag(jnp.array([1e-2, 1e-2]))
+proc_prior = Gaussian(mean=proc_prior_mean, cov=proc_prior_cov)
+
+proc_stddev = base_stddev / jnp.sqrt(alpha_true)
+proc_lklhd = LinearGaussian(noise_stddev=proc_stddev)
+process = LinearRegression(prior=proc_prior, likelihood=proc_lklhd)
 
 # Create model (Gaussian)
-prior = Gaussian(mean=prior_mean, cov=prior_cov)
-model = LinearGaussian(noise_stddev=noise_stddev)
-linreg = LinearRegression(prior=prior, likelihood=model)
+mdl_prior_mean = jnp.zeros(2)
+mdl_prior_cov = jnp.diag(jnp.array([2.0, 2.0]))
+mdl_prior = Gaussian(mean=mdl_prior_mean, cov=mdl_prior_cov)
+
+mdl_lklhd = LinearGaussian(noise_stddev=base_stddev)
+model = LinearRegression(prior=mdl_prior, likelihood=mdl_lklhd)
 
 print("=" * 80)
-print("PREDICTIVE PERFORMANCE EXPERIMENT: STUDENT-T TRUE PROCESS")
+print("PREDICTIVE PERFORMANCE EXPERIMENT: GAUSSIAN TRUE PROCESS")
 print("=" * 80)
-print(f"TRUE PROCESS: Student-t with df={df_true}")
-print(f"  Noise: σ² = {noise_stddev**2:.4f}")
+print(f"TRUE PROCESS: Gaussian with σ² = {proc_stddev**2:.4f}")
 print(f"\nMODEL: LinearGaussian")
 print(f"  Robust learning:   q(θ|x) ∝ p(θ) p(x|θ)^α")
 print(f"  Robust prediction: σ²/α")
@@ -141,18 +108,18 @@ for trial in range(num_trials):
 
     # Sample true parameter from prior
     rng_key, sub_key = jr.split(rng_key)
-    theta_true = prior.sample(sub_key, 1)[0]
+    theta_true = process.prior.sample(sub_key, 1)[0]
 
     # ========== OPTIMAL DESIGN ==========
     xi_optimal = generate_optimal_design(num_design_points)
     rng_key, sub_key = jr.split(rng_key)
-    y_optimal = process.sample(sub_key, xi_optimal, theta_true)
+    y_optimal = process.likelihood.sample(sub_key, xi_optimal, theta_true)
 
     # ========== UNIFORM DESIGN ==========
     rng_key, sub_key = jr.split(rng_key)
     xi_uniform = generate_uniform_design(sub_key, num_design_points)
     rng_key, sub_key = jr.split(rng_key)
-    y_uniform = process.sample(sub_key, xi_uniform, theta_true)
+    y_uniform = process.likelihood.sample(sub_key, xi_uniform, theta_true)
 
     # ========== TEST POINT ==========
     rng_key, sub_keys = custom_split(rng_key, num_test_points + 1)
@@ -160,20 +127,20 @@ for trial in range(num_trials):
 
     # Sample test observations for each test design
     rng_key, sub_keys = custom_split(rng_key, num_test_points + 1)
-    y_test = jax.vmap(lambda k, xi: process.sample(k, xi, theta_true))(sub_keys, xi_test)
+    y_test = jax.vmap(lambda k, xi: process.likelihood.sample(k, xi, theta_true))(sub_keys, xi_test)
 
     # ========== EVALUATE ALL ALPHAS ==========
     def evaluate_alpha(alpha):
         # Optimal design
-        posterior_opt = linreg.get_tilted_posterior(y_optimal, xi_optimal, alpha)
+        posterior_opt = model.get_tilted_posterior(y_optimal, xi_optimal, alpha)
         log_preds_opt = jax.vmap(
-            lambda xi_i, y_i: linreg.get_posterior_predictive(posterior_opt, xi_i, alpha).logpdf(y_i)
+            lambda xi_i, y_i: model.get_posterior_predictive(posterior_opt, xi_i, alpha).logpdf(y_i)
         )(xi_test, y_test)
 
         # Uniform design
-        posterior_unif = linreg.get_tilted_posterior(y_uniform, xi_uniform, alpha)
+        posterior_unif = model.get_tilted_posterior(y_uniform, xi_uniform, alpha)
         log_preds_unif = jax.vmap(
-            lambda xi_i, y_i: linreg.get_posterior_predictive(posterior_unif, xi_i, alpha).logpdf(y_i)
+            lambda xi_i, y_i: model.get_posterior_predictive(posterior_unif, xi_i, alpha).logpdf(y_i)
         )(xi_test, y_test)
 
         return jnp.mean(log_preds_opt), jnp.mean(log_preds_unif)
@@ -195,14 +162,16 @@ print("=" * 80)
 # Statistics
 mean_elpd_opt = jnp.mean(elpd_optimal, axis=1)
 std_elpd_opt = jnp.std(elpd_optimal, axis=1)
+se_elpd_opt = std_elpd_opt / jnp.sqrt(num_trials)
 mean_elpd_unif = jnp.mean(elpd_uniform, axis=1)
 std_elpd_unif = jnp.std(elpd_uniform, axis=1)
+se_elpd_unif = std_elpd_unif / jnp.sqrt(num_trials)
 
-print(f"\n{'α':>8} | {'Optimal':>20} | {'Uniform':>20}")
+print(f"\n{'α':>8} | {'Optimal (mean ± SE)':>20} | {'Uniform (mean ± SE)':>20}")
 print("-" * 55)
 for alpha_target in [0.01, 0.05, 0.1, 0.2, 0.5, 1.0]:
     idx = jnp.argmin(jnp.abs(alpha_values - alpha_target))
-    print(f"{alpha_values[idx]:>8.3f} | {mean_elpd_opt[idx]:>10.4f} ± {std_elpd_opt[idx]:<7.4f} | {mean_elpd_unif[idx]:>10.4f} ± {std_elpd_unif[idx]:<7.4f}")
+    print(f"{alpha_values[idx]:>8.3f} | {mean_elpd_opt[idx]:>10.4f} ± {se_elpd_opt[idx]:<7.4f} | {mean_elpd_unif[idx]:>10.4f} ± {se_elpd_unif[idx]:<7.4f}")
 
 print("\n" + "=" * 80)
 
@@ -219,15 +188,17 @@ q05_unif = jnp.percentile(elpd_uniform, 5, axis=1)
 q95_unif = jnp.percentile(elpd_uniform, 95, axis=1)
 
 # Save summary statistics for LaTeX plotting
-csv_path = "examples/linear_regression/linreg_studentt_predictive.csv"
+csv_path = "examples/linear_regression/data/linreg_gaussian_elpd.csv"
 with open(csv_path, "w", newline="") as csv_file:
     writer = csv.writer(csv_file)
     writer.writerow([
         "alpha",
         "mean_opt",
+        "se_opt",
         "q05_opt",
         "q95_opt",
         "mean_unif",
+        "se_unif",
         "q05_unif",
         "q95_unif",
     ])
@@ -235,9 +206,11 @@ with open(csv_path, "w", newline="") as csv_file:
         writer.writerow([
             float(alpha_values[idx]),
             float(mean_elpd_opt[idx]),
+            float(se_elpd_opt[idx]),
             float(q05_opt[idx]),
             float(q95_opt[idx]),
             float(mean_elpd_unif[idx]),
+            float(se_elpd_unif[idx]),
             float(q05_unif[idx]),
             float(q95_unif[idx]),
         ])

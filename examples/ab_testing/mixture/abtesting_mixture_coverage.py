@@ -14,12 +14,13 @@ from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 from jax.scipy.special import betainc
+
 import csv
+import matplotlib.pyplot as plt
 
 from rdesign.distributions import Beta
 from rdesign.ab_testing import ABTesting, Binomial
 
-import matplotlib.pyplot as plt
 
 jax.config.update("jax_enable_x64", True)
 
@@ -85,7 +86,7 @@ def compute_coverage_at_level(cdf_values: Array, level: float) -> float:
     lower = (1.0 - level) / 2.0
     upper = 1.0 - lower
 
-    # Check if CDF value is within boundsyou get teh
+    # Check if CDF value is within bounds
     in_interval = (cdf_values >= lower) & (cdf_values <= upper)
     return jnp.mean(in_interval)
 
@@ -113,15 +114,15 @@ if __name__ == "__main__":
 
     # Models: Beta-Binomial
     alpha_nominal = 1.0
-    alpha_robust = 0.05
+    alpha_robust = 5e-2
 
     # Experiment settings
-    num_trials = 100_000
+    num_trials = 10_000
 
     # Prior Setup
     prior = Beta(
-        delta=jnp.array([1.0, 1.0]),
-        gamma=jnp.array([50.0, 10.0])
+        delta=jnp.array([10.0, 1.0]),
+        gamma=jnp.array([50.0, 5.0])
     )
 
     # Instantiate Classes
@@ -146,13 +147,13 @@ if __name__ == "__main__":
     print("=" * 80)
     print("COVERAGE COMPARISON: A/B TESTING")
     print("=" * 80)
-    print("TRUE PROCESS: Heavy Tail Binomial (Asymmetric)")
+    print("TRUE PROCESS: Heavy Tail Binomial")
     print(f"  Concentration A: {concentration_a}")
     print(f"  Concentration B: {concentration_b}")
     print(f"  Participants:    {num_participants}")
     print("\nMODELS: Beta-Binomial")
-    print(f"  Nominal α={alpha_nominal:.1f}:    Standard Bayesian Update")
-    print(f"  Robust  α={alpha_robust:.1f}:    Tilted Posterior")
+    print(f"  Nominal α={alpha_nominal:.1f}:   Bayes Posterior")
+    print(f"  Robust  α={alpha_robust:.1f}:    Robust Posterior")
     print(f"\nNumber of trials:    {num_trials}")
     print("=" * 80)
 
@@ -215,7 +216,7 @@ if __name__ == "__main__":
     curve_rand_rob = compute_calibration_curve(cdf_rand_robust, expected_levels)
 
     # Write plotted data to CSV
-    csv_path = "examples/ab_testing/abtesting_binomial_coverage.csv"
+    csv_path = "examples/ab_testing/data/abtesting_mixture_coverage.csv"
     with open(csv_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([

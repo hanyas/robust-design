@@ -1,5 +1,5 @@
 """
-Nested Monte Carlo optimization of Sibson's alpha-MI for linear regression.
+Nested Monte Carlo optimization of Sibson's alpha-MI for linear regression using LBFGS.
 
 We use the nested Monte Carlo estimator from rdesign.utils for the robust EIG.
 The analytic optimum is at xi in {+1, -1} by symmetry, so we compare against those endpoints.
@@ -8,8 +8,8 @@ The analytic optimum is at xi in {+1, -1} by symmetry, so we compare against tho
 from typing import Tuple
 
 import jax
-import optax
 from jax import Array, random, numpy as jnp
+from jaxopt import LBFGSB
 
 from rdesign.distributions import Gaussian
 from rdesign.linear_regression import LinearGaussian
@@ -20,22 +20,19 @@ jax.config.update("jax_enable_x64", True)
 # Model parameters
 prior_mean = jnp.zeros(2)
 prior_cov = jnp.eye(2)
-noise_stddev = 0.1
+noise_stddev = 0.3
 
 # Robustness / estimator settings
-alpha = 0.9
+alpha = 0.95
 num_outer = 16
 num_inner = 16
 
 # Optimization settings
-learning_rate = 5e-2
-num_steps = 200
 num_runs = 50
-success_tol = 1e-2
+maxiter = 100
 
 prior = Gaussian(mean=prior_mean, cov=prior_cov)
 likelihood = LinearGaussian(noise_stddev=noise_stddev)
-optimizer = optax.adam(learning_rate)
 
 
 def estimate_sibson_alpha_mi(rng_key: Array, xi: Array) -> Array:
@@ -54,27 +51,37 @@ def estimate_sibson_alpha_mi(rng_key: Array, xi: Array) -> Array:
 
 @jax.jit
 def optimize_design(rng_key: Array) -> Tuple[Array, Array]:
-    """Optimize the design and return (xi, estimated MI)."""
-    init_key, step_key, eval_key = random.split(rng_key, 3)
-    params = random.normal(init_key, (1,))
-    opt_state = optimizer.init(params)
+    """Optimize the design using LBFGSB and return (xi, estimated MI)."""
+    init_key, opt_key, eval_key = random.split(rng_key, 3)
 
-    def step(state, key):
-        params, opt_state = state
+    # Initial guess: random points between -1 and 1
+    x0 = random.uniform(init_key, (1,), minval=-1.0, maxval=1.0)
 
-        def loss_fn(p):
-            xi = jnp.tanh(p)[0]
-            return -estimate_sibson_alpha_mi(key, xi)
+    def objective(xi, key):
+        return -estimate_sibson_alpha_mi(key, xi)
 
-        loss, grad = jax.value_and_grad(loss_fn)(params)
-        updates, opt_state = optimizer.update(grad, opt_state, params)
-        params = optax.apply_updates(params, updates)
-        return (params, opt_state), loss
+    # LBFGSB from jaxopt with parameters inspired by the example
+    optimizer = LBFGSB(
+        fun=objective,
+        maxiter=maxiter,
+        jit=True,
+        linesearch="zoom",
+        linesearch_init="increase",
+        maxls=10,
+        tol=1e-3
+    )
 
-    keys = random.split(step_key, num_steps)
-    (params, _), _ = jax.lax.scan(step, (params, opt_state), keys)
+    # We use a fixed key for the objective to make it deterministic for the optimizer.
+    # This is a common trick when using deterministic optimizers on stochastic objectives.
+    bounds = (jnp.array([-1.0]), jnp.array([1.0]))
 
-    xi = jnp.tanh(params)[0]
+    result = optimizer.run(
+        init_params=x0,
+        key=opt_key,
+        bounds=bounds
+    )
+
+    xi = result.params[0]
     final_mi = estimate_sibson_alpha_mi(eval_key, xi)
     return xi, final_mi
 
@@ -94,11 +101,11 @@ if __name__ == "__main__":
     mi_values = jnp.array(mi_values)
 
     print("=" * 80)
-    print("NESTED MONTE CARLO SIBSON OPTIMIZATION")
+    print("NESTED MONTE CARLO SIBSON OPTIMIZATION (LBFGS)")
     print("=" * 80)
     print(f"alpha: {alpha}")
     print(f"num_outer: {num_outer}  num_inner: {num_inner}")
-    print(f"num_steps: {num_steps}  learning_rate: {learning_rate}")
+    print(f"maxiter: {maxiter}")
     print(f"num_runs: {num_runs}")
     print()
 

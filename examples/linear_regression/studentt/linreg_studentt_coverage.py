@@ -114,37 +114,42 @@ def generate_optimal_design(num_designs: int) -> Array:
 # Configuration
 rng_key = jr.PRNGKey(42)
 
-# True process: Student-t
-df_true = 3.
-noise_stddev = jnp.sqrt(1e-1)
-
 # Models: Gaussian
-# jnp.logspace(-2, 0, 25)  # from 0.01 to 1.0
-alpha_robust = 1e-2   # Robust model
-alpha_nominal = 1.0   # Nominal model
+# jnp.logspace(-2, 0, 25)
+alpha_robust = 1e-2
+alpha_nominal = 1.0
 
 # Experiment parameters
-num_designs = 10       # Number of designs
-num_trials = 100_000   # Number of trials
+num_designs = 2
+num_trials = 10_000
 
 # Prior
 dim_theta = 2
-prior_mean = jnp.zeros(2)
-prior_cov = jnp.diag(jnp.array([3.0, 2.0]))  # jnp.eye(2)
+base_stddev = jnp.sqrt(1e-2)
 
 # Create true process (Student-t)
-process = LinearStudentT(df=df_true, noise_stddev=noise_stddev)
+df_true = 3.
+
+proc_prior_mean = jnp.array([1.5, -1.5])
+proc_prior_cov = jnp.diag(jnp.array([1e-2, 1e-2]))
+proc_prior = Gaussian(mean=proc_prior_mean, cov=proc_prior_cov)
+
+proc_stddev = base_stddev * 2
+proc_lkld = LinearStudentT(df=df_true, noise_stddev=proc_stddev)
 
 # Create model (Gaussian)
-prior = Gaussian(mean=prior_mean, cov=prior_cov)
-model = LinearGaussian(noise_stddev=noise_stddev)
-linreg = LinearRegression(prior=prior, likelihood=model)
+mdl_prior_mean = jnp.zeros(2)
+mdl_prior_cov = jnp.diag(jnp.array([2.0, 2.0]))
+mdl_prior = Gaussian(mean=mdl_prior_mean, cov=mdl_prior_cov)
+
+mdl_lklhd = LinearGaussian(noise_stddev=base_stddev)
+model = LinearRegression(prior=mdl_prior, likelihood=mdl_lklhd)
 
 print("=" * 80)
 print("COVERAGE COMPARISON: STUDENT-T TRUE PROCESS")
 print("=" * 80)
 print(f"TRUE PROCESS: Student-t with df={df_true}")
-print(f"  Noise: σ² = {noise_stddev**2}")
+print(f"  Noise: σ² = {proc_stddev**2}")
 print(f"\nMODELS: LinearGaussian")
 print(f"  Nominal α={alpha_nominal:.1f}:    Standard Bayesian Update")
 print(f"  Robust  α={alpha_robust:.2f}:    Tilted Posterior")
@@ -164,18 +169,18 @@ def run_single_trial(rng_key):
     key_theta, key_design_rand, key_obs_opt, key_obs_rand = jr.split(rng_key, 4)
 
     # Sample true parameter from prior
-    theta_true = prior.sample(key_theta, 1)[0]
+    theta_true = proc_prior.sample(key_theta, 1)[0]
 
     # ========== OPTIMIZED DESIGN ==========
-    y_optimal = process.sample(key_obs_opt, xi_optimal, theta_true)
-    posterior_opt_nominal = linreg.get_tilted_posterior(y_optimal, xi_optimal, alpha_nominal)
-    posterior_opt_robust = linreg.get_tilted_posterior(y_optimal, xi_optimal, alpha_robust)
+    y_optimal = proc_lkld.sample(key_obs_opt, xi_optimal, theta_true)
+    posterior_opt_nominal = model.get_tilted_posterior(y_optimal, xi_optimal, alpha_nominal)
+    posterior_opt_robust = model.get_tilted_posterior(y_optimal, xi_optimal, alpha_robust)
 
     # ========== Uniform DESIGN ==========
     xi_uniform = generate_uniform_design(key_design_rand, num_designs)
-    y_uniform = process.sample(key_obs_rand, xi_uniform, theta_true)
-    posterior_rand_nominal = linreg.get_tilted_posterior(y_uniform, xi_uniform, alpha_nominal)
-    posterior_rand_robust = linreg.get_tilted_posterior(y_uniform, xi_uniform, alpha_robust)
+    y_uniform = proc_lkld.sample(key_obs_rand, xi_uniform, theta_true)
+    posterior_rand_nominal = model.get_tilted_posterior(y_uniform, xi_uniform, alpha_nominal)
+    posterior_rand_robust = model.get_tilted_posterior(y_uniform, xi_uniform, alpha_robust)
 
     # Compute Mahalanobis distances
     return jnp.array([
@@ -216,7 +221,7 @@ cal_curve_rand_nominal = compute_calibration_curve(mahal_rand_nominal, coverage_
 cal_curve_rand_robust = compute_calibration_curve(mahal_rand_robust, coverage_levels, dim_theta)
 
 # Write plotted data to CSV
-csv_path = "examples/linear_regression/linreg_studentt_coverage.csv"
+csv_path = "examples/linear_regression/data/linreg_studentt_coverage.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow([

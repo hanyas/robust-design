@@ -20,13 +20,13 @@ jax.config.update("jax_enable_x64", True)
 num_participants = 25
 
 # Beta prior parameters
-prior_delta = jnp.array([1.0, 1.0])
+prior_delta = jnp.array([2.0, 1.0])
 prior_gamma = jnp.array([3.0, 5.0])
 
 # Create the ABTesting model
 prior = Beta(delta=prior_delta, gamma=prior_gamma)
-model = Binomial(num_participants=num_participants)
-abtest = ABTesting(prior=prior, likelihood=model)
+lklhd = Binomial(num_participants=num_participants)
+model = ABTesting(prior=prior, likelihood=lklhd)
 
 print("A/B Testing Model Configuration")
 print("=" * 60)
@@ -45,15 +45,15 @@ designs = jnp.arange(num_participants + 1)
 
 # Compute MI for all designs and all alpha values
 print("Computing Sibson MI for each design and alpha value...")
-vmap_sibson = jax.vmap(jax.vmap(abtest.sibson_mi, in_axes=(0, None)), in_axes=(None, 0))
+vmap_sibson = jax.vmap(jax.vmap(model.sibson_mi, in_axes=(0, None)), in_axes=(None, 0))
 mi_matrix = vmap_sibson(designs, alpha_values)
 optimal_designs = jnp.argmax(mi_matrix, axis=1)
 
 for i, alpha in enumerate(alpha_values):
     print(f"  α = {alpha:.4f}... optimal n_A = {optimal_designs[i]}")
 
-# Write plotted data to CSV (one row per design)
-csv_path = "examples/ab_testing/abtesting_design_plot.csv"
+# Write plotted data to CSV
+csv_path = "examples/ab_testing/data/abtesting_design_plot.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     header = ["n_A"]
