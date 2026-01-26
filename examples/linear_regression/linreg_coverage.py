@@ -1,11 +1,5 @@
 """
 Posterior Calibration Assessment for Misspecified Linear Regression
-
-TRUE PROCESS: Student-t 
-MODELS: LinearGaussian
-
-This script evaluates posterior calibration when the true data-generating process
-has heavy-tailed Student-t noise but we fit a Gaussian model.
 """
 from typing import NamedTuple
 
@@ -17,56 +11,12 @@ from scipy.stats import chi2   # chi2.ppf is not supported in JAX
 import csv
 
 from rdesign.distributions import Gaussian
-from rdesign.linear_regression import LinearGaussian, LinearRegression
+from rdesign.linear_regression import LinearGaussian
+from rdesign.linear_regression import LinearRegression
 
 import matplotlib.pyplot as plt
 
 jax.config.update("jax_enable_x64", True)
-
-
-class LinearStudentT(NamedTuple):
-    """
-    Student-t linear likelihood for regression
-
-    Args:
-        noise_stddev: Noise standard deviation
-        df: Degrees of freedom
-    """
-    df: float
-    noise_stddev: float
-
-    def design_matrix(self, design: Array) -> Array:
-        """Construct augmented design matrix H(ξ) = [ξ, 1]."""
-        design = jnp.atleast_1d(design)
-        size = design.shape[0]
-        return jnp.column_stack([design, jnp.ones(size)])
-
-    def mean(self, design: Array, theta: Array) -> Array:
-        """Compute mean for a single design point."""
-        H = self.design_matrix(design)
-        return H @ theta
-
-    def sample(self, rng_key: Array, design: Array, theta: Array) -> Array:
-        """Sample from Student-t likelihood."""
-        size = design.shape[0]
-
-        loc = self.mean(design, theta)
-        scale_matrix = self.noise_stddev**2 * jnp.eye(size)
-
-        # Sample from chi-squared
-        rng_key, key1, key2 = jr.split(rng_key, 3)
-        chi2_samples = jr.gamma(key1, self.df/2, shape=(size,)) * 2
-
-        # Sample from multivariate normal
-        L = jnp.linalg.cholesky(scale_matrix)
-        z = jr.normal(key2, (size,))
-        normal_samples = loc + L @ z
-
-        # Scale to get Student-t
-        scale_factors = jnp.sqrt(self.df / chi2_samples)
-        t_samples = loc + (normal_samples - loc) * scale_factors
-
-        return t_samples
 
 
 def compute_mahalanobis_distance(
@@ -95,7 +45,7 @@ def compute_calibration_curve(
     coverage_levels: Array,
     dim: int,
 ) -> Array:
-    """Compute actual coverage at different credible levels."""    
+    """Compute actual coverage at different credible levels."""
     # Pre-compute thresholds using scipy outside of JAX transformations
     thresholds = chi2.ppf(coverage_levels, df=dim)
     return jax.vmap(lambda t: jnp.mean(mahalanobis_distances <= t))(thresholds)
@@ -115,27 +65,27 @@ def generate_optimal_design(num_designs: int) -> Array:
 rng_key = jr.PRNGKey(42)
 
 # Models: Gaussian
-# jnp.logspace(-2, 0, 25)
-alpha_robust = 1e-2
+# jnp.logspace(-2, 0, 25)  # from 0.01 to 1.0
 alpha_nominal = 1.0
+alpha_true = 5e-1
+alpha_robust = 1e-1
 
 # Experiment parameters
 num_designs = 2
 num_trials = 10_000
 
-# Prior
+# Noise scale
 dim_theta = 2
 base_stddev = jnp.sqrt(1e-2)
 
-# Create true process (Student-t)
-df_true = 3.
-
+# Create true process
 proc_prior_mean = jnp.array([1.5, -1.5])
 proc_prior_cov = jnp.diag(jnp.array([1e-2, 1e-2]))
 proc_prior = Gaussian(mean=proc_prior_mean, cov=proc_prior_cov)
 
-proc_stddev = base_stddev * 2
-proc_lkld = LinearStudentT(df=df_true, noise_stddev=proc_stddev)
+proc_stddev = base_stddev / jnp.sqrt(alpha_true)
+proc_lklhd = LinearGaussian(noise_stddev=proc_stddev)
+process = LinearRegression(prior=proc_prior, likelihood=proc_lklhd)
 
 # Create model (Gaussian)
 mdl_prior_mean = jnp.zeros(2)
@@ -146,10 +96,9 @@ mdl_lklhd = LinearGaussian(noise_stddev=base_stddev)
 model = LinearRegression(prior=mdl_prior, likelihood=mdl_lklhd)
 
 print("=" * 80)
-print("COVERAGE COMPARISON: STUDENT-T TRUE PROCESS")
+print("COVERAGE COMPARISON: GAUSSIAN TRUE PROCESS")
 print("=" * 80)
-print(f"TRUE PROCESS: Student-t with df={df_true}")
-print(f"  Noise: σ² = {proc_stddev**2}")
+print(f"TRUE PROCESS: Gaussian with σ² = {proc_stddev**2}")
 print(f"\nMODELS: LinearGaussian")
 print(f"  Nominal α={alpha_nominal:.1f}:    Standard Bayesian Update")
 print(f"  Robust  α={alpha_robust:.2f}:    Tilted Posterior")
@@ -169,16 +118,16 @@ def run_single_trial(rng_key):
     key_theta, key_design_rand, key_obs_opt, key_obs_rand = jr.split(rng_key, 4)
 
     # Sample true parameter from prior
-    theta_true = proc_prior.sample(key_theta, 1)[0]
+    theta_true = process.prior.sample(key_theta, 1)[0]
 
     # ========== OPTIMIZED DESIGN ==========
-    y_optimal = proc_lkld.sample(key_obs_opt, xi_optimal, theta_true)
+    y_optimal = process.likelihood.sample(key_obs_opt, xi_optimal, theta_true)
     posterior_opt_nominal = model.get_tilted_posterior(y_optimal, xi_optimal, alpha_nominal)
     posterior_opt_robust = model.get_tilted_posterior(y_optimal, xi_optimal, alpha_robust)
 
     # ========== Uniform DESIGN ==========
     xi_uniform = generate_uniform_design(key_design_rand, num_designs)
-    y_uniform = proc_lkld.sample(key_obs_rand, xi_uniform, theta_true)
+    y_uniform = process.likelihood.sample(key_obs_rand, xi_uniform, theta_true)
     posterior_rand_nominal = model.get_tilted_posterior(y_uniform, xi_uniform, alpha_nominal)
     posterior_rand_robust = model.get_tilted_posterior(y_uniform, xi_uniform, alpha_robust)
 
@@ -221,7 +170,7 @@ cal_curve_rand_nominal = compute_calibration_curve(mahal_rand_nominal, coverage_
 cal_curve_rand_robust = compute_calibration_curve(mahal_rand_robust, coverage_levels, dim_theta)
 
 # Write plotted data to CSV
-csv_path = "examples/linear_regression/data/linreg_studentt_coverage.csv"
+csv_path = "examples/linear_regression/data/linreg_coverage.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow([
@@ -304,19 +253,19 @@ fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 ax.plot([0, 1], [0, 1], ':', color='0.2', lw=2, label='Perfect')
 
 # Optimal design - Nominal (dark grey, dashed)
-ax.plot(coverage_levels, cal_curve_opt_nominal, '--', color='0.1', lw=2.5, 
+ax.plot(coverage_levels, cal_curve_opt_nominal, '--', color='0.1', lw=2.5,
         label=f'Nominal w/ Optimal (α={alpha_nominal:.1f})')
 
 # Optimal design - Robust (dark grey, solid)
-ax.plot(coverage_levels, cal_curve_opt_robust, '-', color='0.1', lw=2.5, 
+ax.plot(coverage_levels, cal_curve_opt_robust, '-', color='0.1', lw=2.5,
         label=f'Robust w/ Optimal (α={alpha_robust:.2f})')
 
 # Uniform design - Nominal (medium grey, dashed)
-ax.plot(coverage_levels, cal_curve_rand_nominal, '--', color='0.5', lw=2.5, 
+ax.plot(coverage_levels, cal_curve_rand_nominal, '--', color='0.5', lw=2.5,
         label=f'Nominal w/ Uniform (α={alpha_nominal:.1f})')
 
 # Uniform design - Robust (medium grey, solid)
-ax.plot(coverage_levels, cal_curve_rand_robust, '-', color='0.5', lw=2.5, 
+ax.plot(coverage_levels, cal_curve_rand_robust, '-', color='0.5', lw=2.5,
         label=f'Robust w/ Uniform (α={alpha_robust:.2f})')
 
 ax.set_xlabel('Expected Coverage', fontsize=12)

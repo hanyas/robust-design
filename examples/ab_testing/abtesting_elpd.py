@@ -1,10 +1,6 @@
 """
 Posterior Predictive Performance for Misspecified A/B Testing
-
-TRUE PROCESS: Heavy-Tailed Binomial
-MODELS: Beta-Binomial with α-tilted posterior and predictive
 """
-
 from typing import NamedTuple
 
 import jax
@@ -25,10 +21,10 @@ jax.config.update("jax_enable_x64", True)
 class TiltedBinomial(NamedTuple):
     """
     Generates data from the α-tilted Binomial likelihood p_α(x | θ).
-    
+
     Args:
         num_participants: Total participants (defines the support size)
-        alpha: Tilting parameter. 
+        alpha: Tilting parameter.
     """
     num_participants: int
     alpha: float = 1.0
@@ -47,15 +43,15 @@ class TiltedBinomial(NamedTuple):
         mask = (k >= 0) & (k <= n)
         safe_k = jnp.where(mask, k, 0.0)
         safe_nmk = jnp.where(mask, n - safe_k, 0.0)
-        
+
         # Log Binomial Coefficient: log(nCx)
         log_comb = gammaln(n + 1) - gammaln(safe_k + 1) - gammaln(safe_nmk + 1)
-        
+
         # Log Likelihood: x log(θ) + (n-x) log(1-θ)
         # We clamp theta to avoid log(0)
         theta = jnp.clip(theta, 1e-6, 1.0 - 1e-6)
         log_lklhd = safe_k * jnp.log(theta) + safe_nmk * jnp.log(1.0 - theta)
-        
+
         # Tilted Log Prob: α * (log_comb + log_lklhd)
         return jnp.where(mask, self.alpha * (log_comb + log_lklhd), -jnp.inf)
 
@@ -64,21 +60,21 @@ class TiltedBinomial(NamedTuple):
         Sample observations x from the tilted likelihood.
         """
         trials = self.get_trials(design)
-        
+
         # Grid of all possible outcomes [0, 1, ..., N]
         k_grid = jnp.arange(self.num_participants + 1, dtype=jnp.float32)
-        
+
         def sample_group(key, n, theta):
             # 1. Compute unnormalized logits for all k
             logits = self._log_tilted_prob(k_grid, n, theta)
-            
+
             # 2. Sample from Categorical
             # JAX's categorical handles the normalization (log-sum-exp) internally
             return jr.categorical(key, logits).astype(jnp.float32)
 
         # Vectorize sampling over the two groups (A and B)
         keys = jr.split(rng_key, 2)
-        
+
         # vmap applies sample_group to (key[0], trials[0], theta[0]) and (...[1]...)
         return jax.vmap(sample_group)(keys, trials, theta_true)
 
@@ -117,7 +113,7 @@ proc_prior = Beta(
     gamma=jnp.array([1, 5000.0])
 )
 proc_lklhd = TiltedBinomial(
-    num_participants=num_participants, 
+    num_participants=num_participants,
     alpha=alpha_true
 )
 
@@ -283,7 +279,7 @@ q95_opt = jnp.percentile(elpd_optimal, 95, axis=1)
 q05_unif = jnp.percentile(elpd_uniform, 5, axis=1)
 q95_unif = jnp.percentile(elpd_uniform, 95, axis=1)
 
-csv_path = "examples/ab_testing/data/abtesting_binomial_elpd.csv"
+csv_path = "examples/ab_testing/data/abtesting_elpd.csv"
 with open(csv_path, "w", newline="") as csv_file:
     writer = csv.writer(csv_file)
     writer.writerow([

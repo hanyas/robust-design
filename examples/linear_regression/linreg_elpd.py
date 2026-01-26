@@ -1,10 +1,5 @@
 """
 Posterior Predictive Performance for Misspecified Linear Regression
-
-TRUE PROCESS: Student-t
-MODELS: LinearGaussian with α-tilted posterior and predictive
-
-This ensures the caution exercised during learning is consistently applied to prediction.
 """
 from typing import NamedTuple
 
@@ -188,7 +183,7 @@ q05_unif = jnp.percentile(elpd_uniform, 5, axis=1)
 q95_unif = jnp.percentile(elpd_uniform, 95, axis=1)
 
 # Save summary statistics for LaTeX plotting
-csv_path = "examples/linear_regression/data/linreg_gaussian_elpd.csv"
+csv_path = "examples/linear_regression/data/linreg_elpd.csv"
 with open(csv_path, "w", newline="") as csv_file:
     writer = csv.writer(csv_file)
     writer.writerow([

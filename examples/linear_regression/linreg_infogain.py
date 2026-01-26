@@ -1,9 +1,5 @@
 """
 Robust Experimental Design: Under-Promise, Over-Deliver Assessment
-
-This script demonstrates that maximizing the Robust Expected Information Gain (Sibson MI)
-provides a rigorous lower bound on the True Expected Information Gain (Shannon MI),
-provided the true process is "nicer" (less misspecified) than the worst-case assumption.
 """
 import jax
 from jax import Array
@@ -130,19 +126,6 @@ print(f"Robust gap    (Oracle - Perceived):  {avg_oracle - avg_robust:+.4f} nats
 print("=" * 80)
 
 # ============================================================================
-# Save Results
-# ============================================================================
-
-# csv_path = "examples/linear_regression/data/linreg_gaussian_infogain.csv"
-# with open(csv_path, "w", newline="") as csvfile:
-#     writer = csv.writer(csvfile)
-#     writer.writerow(["ig_oracle", "ig_nominal", "ig_robust"])
-#     for row in zip(dist_oracle.tolist(), dist_nominal.tolist(), dist_robust.tolist()):
-#         writer.writerow(row)
-#
-# print(f"\nData saved to {csv_path}")
-
-# ============================================================================
 # Visualization
 # ============================================================================
 
@@ -180,7 +163,7 @@ hist_robust, bin_edges_robust, patches_robust = ax.hist(
 bin_centers = (bin_edges_nominal[:-1] + bin_edges_nominal[1:]) / 2
 
 # Save to CSV
-csv_path = "examples/linear_regression/data/linreg_gaussian_infogain_hist.csv"
+csv_path = "examples/linear_regression/data/linreg_infogain.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow(["bin_center", "nominal_count", "robust_count"])
@@ -192,19 +175,10 @@ print(f"\nHistogram data saved to {csv_path} ({len(bin_centers)} bins)")
 # Vertical lines
 ax.axvline(promise_eig, color='0.1', linestyle='--', lw=2.5,
            label=f'Sibson MI: {promise_eig:.2f}')
-# ax.axvline(avg_oracle, color='darkgreen', linestyle='-', lw=2.5,
-#            label=f'Avg Oracle: {avg_oracle:.2f}')
-# ax.axvline(avg_nominal, color='steelblue', linestyle=':', lw=2.5,
-#            label=f'Avg Nominal: {avg_nominal:.2f}')
-# ax.axvline(avg_robust, color='darkred', linestyle=':', lw=2.5,
-#            label=f'Sibson agg Robust: {avg_robust:.2f}')
 
 ax.set_xlabel('Information Gain (nats)', fontsize=12)
 ax.set_ylabel('Frequency', fontsize=12)
 ax.set_xlim(left=None, right=8)
-ax.set_title(f'Robust Information Gain: Under-Promise, Over-Deliver\n'
-             f'(True α={alpha_true}, Robust α={alpha_robust})',
-             fontsize=13, fontweight='bold')
 ax.legend(fontsize=9, loc='upper right')
 ax.grid(alpha=0.3)
 

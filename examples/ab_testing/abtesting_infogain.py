@@ -1,10 +1,5 @@
 """
 Robust Experimental Design: Under-Promise, Over-Deliver Assessment (A/B Testing)
-
-This script demonstrates that maximizing the Robust Expected Information Gain (Sibson MI)
-provides a rigorous lower bound on the True Expected Information Gain (Shannon MI)
-in an A/B testing context, provided the true process is "nicer" (less misspecified)
-than the worst-case assumption.
 """
 from typing import NamedTuple
 
@@ -187,19 +182,6 @@ print(f"Robust gap     (Oracle - Perceived):  {avg_oracle - avg_robust:+.4f} nat
 print("=" * 80)
 
 # ============================================================================
-# Save Results
-# ============================================================================
-
-csv_path = "examples/ab_testing/data/abtesting_binomial_infogain.csv"
-with open(csv_path, "w", newline="") as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow(["ig_oracle", "ig_nominal", "ig_robust"])
-    for row in zip(dist_oracle.tolist(), dist_nominal.tolist(), dist_robust.tolist()):
-        writer.writerow(row)
-
-print(f"\nData saved to {csv_path}")
-
-# ============================================================================
 # Visualization
 # ============================================================================
 
@@ -237,7 +219,7 @@ hist_robust, bin_edges_robust, patches_robust = ax.hist(
 bin_centers = (bin_edges_nominal[:-1] + bin_edges_nominal[1:]) / 2
 
 # Save to CSV
-csv_path = "examples/ab_testing/data/abtesting_binomial_infogain_hist.csv"
+csv_path = "examples/ab_testing/data/abtesting_infogain.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow(["bin_center", "nominal_count", "robust_count"])
@@ -252,9 +234,6 @@ ax.axvline(promise_eig, color='0.1', linestyle='--', lw=2.5,
 
 ax.set_xlabel('Information Gain (nats)', fontsize=12)
 ax.set_ylabel('Frequency', fontsize=12)
-ax.set_title(f'Robust Information Gain (A/B Testing): Under-Promise, Over-Deliver\n'
-             f'(True α={alpha_true}, Robust α={alpha_robust})',
-             fontsize=13, fontweight='bold')
 ax.legend(fontsize=9, loc='upper right')
 ax.grid(alpha=0.3)
 

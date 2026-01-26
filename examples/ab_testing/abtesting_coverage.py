@@ -1,11 +1,5 @@
 """
 Posterior Calibration Assessment for Misspecified A/B Testing
-
-TRUE PROCESS: Heavey-Tailed Binomial
-MODELS: BetaBinomial
-
-This script evaluates posterior calibration when the true data-generating process
-has overdispersion but we fit a standard Binomial model.
 """
 from typing import NamedTuple
 
@@ -13,7 +7,7 @@ import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
-from jax.scipy.special import betainc
+from jax.scipy.special import betainc, gammaln
 
 import csv
 import matplotlib.pyplot as plt
@@ -21,22 +15,19 @@ import matplotlib.pyplot as plt
 from rdesign.distributions import Beta
 from rdesign.ab_testing import ABTesting, Binomial
 
-
 jax.config.update("jax_enable_x64", True)
 
 
-class HeavyTailBinomial(NamedTuple):
+class TiltedBinomial(NamedTuple):
     """
-    True generative process: Heavy Tail Binomial with asymmetric overdispersion.
+    Generates data from the α-tilted Binomial likelihood p_α(x | θ).
 
     Args:
-        num_participants: Total participants per experiment
-        concentration_a: Overdispersion for Group A
-        concentration_b: Overdispersion for Group B
+        num_participants: Total participants
+        alpha: Tilting parameter.
     """
     num_participants: int
-    concentration_a: float = 100.0
-    concentration_b: float = 100.0
+    alpha: float = 1.0
 
     def get_trials(self, design: Array) -> Array:
         """Get trial counts [n_A, n_B] from design (n_A)."""
@@ -44,27 +35,48 @@ class HeavyTailBinomial(NamedTuple):
         n_b = self.num_participants - design
         return jnp.array([n_a, n_b], dtype=jnp.float32)
 
+    def _log_tilted_prob(self, k: Array, n: Array, theta: Array) -> Array:
+        """
+        Computes unnormalized log probability: α * log(Binomial PMF)
+        """
+        # Safe masking for support [0, n]
+        mask = (k >= 0) & (k <= n)
+        safe_k = jnp.where(mask, k, 0.0)
+        safe_nmk = jnp.where(mask, n - safe_k, 0.0)
+
+        # Log Binomial Coefficient: log(nCx)
+        log_comb = gammaln(n + 1) - gammaln(safe_k + 1) - gammaln(safe_nmk + 1)
+
+        # Log Likelihood: x log(θ) + (n-x) log(1-θ)
+        # We clamp theta to avoid log(0)
+        theta = jnp.clip(theta, 1e-6, 1.0 - 1e-6)
+        log_lklhd = safe_k * jnp.log(theta) + safe_nmk * jnp.log(1.0 - theta)
+
+        # Tilted Log Prob: α * (log_comb + log_lklhd)
+        return jnp.where(mask, self.alpha * (log_comb + log_lklhd), -jnp.inf)
+
     def sample(self, rng_key: Array, design: Array, theta_true: Array) -> Array:
         """
-        Sample observations x with overdispersion.
+        Sample observations x from the tilted likelihood.
         """
         trials = self.get_trials(design)
-        key_a, key_b = jr.split(rng_key)
 
-        def sample_effective_rate(key, mean, conc):
-            conc = jnp.maximum(conc, 1e-4)
-            a = mean * conc
-            b = (1.0 - mean) * conc
-            return jr.beta(key, a, b)
+        # Grid of all possible outcomes [0, 1, ..., N]
+        k_grid = jnp.arange(self.num_participants + 1, dtype=jnp.float32)
 
-        theta_eff_a = sample_effective_rate(key_a, theta_true[0], self.concentration_a)
-        theta_eff_b = sample_effective_rate(key_b, theta_true[1], self.concentration_b)
+        def sample_group(key, n, theta):
+            # 1. Compute unnormalized logits for all k
+            logits = self._log_tilted_prob(k_grid, n, theta)
 
-        # Sample observed conversions using the jittered rates
-        x_a = jr.binomial(key_a, trials[0].astype(int), theta_eff_a)
-        x_b = jr.binomial(key_b, trials[1].astype(int), theta_eff_b)
+            # 2. Sample from Categorical
+            # JAX's categorical handles the normalization (log-sum-exp) internally
+            return jr.categorical(key, logits).astype(jnp.float32)
 
-        return jnp.array([x_a, x_b], dtype=jnp.float32)
+        # Vectorize sampling over the two groups (A and B)
+        keys = jr.split(rng_key, 2)
+
+        # vmap applies sample_group to (key[0], trials[0], theta[0]) and (...[1]...)
+        return jax.vmap(sample_group)(keys, trials, theta_true)
 
 
 def compute_marginal_cdf(posterior: Beta, theta_true: Array) -> Array:
@@ -107,39 +119,40 @@ if __name__ == "__main__":
     # ============================================================================
     rng_key = jr.PRNGKey(42)
 
-    # True Process: Heavy Tail Binomial
-    concentration_a = 5.0  # High noise
-    concentration_b = 2000.0  # Low noise
-    num_participants = 1000
+    # Experiment settings
+    num_participants = 2500
+    num_trials = 10_000
 
     # Models: Beta-Binomial
     alpha_nominal = 1.0
+    alpha_true = 1e-1
     alpha_robust = 5e-2
 
-    # Experiment settings
-    num_trials = 10_000
-
-    # Prior Setup
-    prior = Beta(
-        delta=jnp.array([10.0, 1.0]),
-        gamma=jnp.array([50.0, 5.0])
+    # True Process (Tilted Binomial)
+    proc_prior = Beta(
+        delta=jnp.array([1, 5000.0]),
+        gamma=jnp.array([1, 5000.0])
     )
-
-    # Instantiate Classes
-    process = HeavyTailBinomial(
+    proc_lklhd = TiltedBinomial(
         num_participants=num_participants,
-        concentration_a=concentration_a,
-        concentration_b=concentration_b
+        alpha=alpha_true
     )
-    model = Binomial(num_participants=num_participants)
-    abtest = ABTesting(prior=prior, likelihood=model)
+
+    # Model (Beta-Binomial)
+    mdl_prior = Beta(
+        delta=jnp.array([2., 50.0]),
+        gamma=jnp.array([2., 50.0])
+    )
+
+    mdl_lklhd = Binomial(num_participants=num_participants)
+    model = ABTesting(prior=mdl_prior, likelihood=mdl_lklhd)
 
     # ============================================================================
     # OPTIMAL DESIGNS
     # ============================================================================
     print("Finding optimal designs...")
-    design_opt_nominal = abtest.optimal_design_shannon()
-    design_opt_robust = abtest.optimal_design_sibson(alpha_robust)
+    design_opt_nominal = model.optimal_design_shannon()
+    design_opt_robust = model.optimal_design_sibson(alpha_robust)
 
     print(f"Optimal n_A - Nominal, α={alpha_nominal:.1f}: {design_opt_nominal}")
     print(f"Optimal n_A - Robust,  α={alpha_robust:.1f}: {design_opt_robust}")
@@ -147,12 +160,10 @@ if __name__ == "__main__":
     print("=" * 80)
     print("COVERAGE COMPARISON: A/B TESTING")
     print("=" * 80)
-    print("TRUE PROCESS: Heavy Tail Binomial")
-    print(f"  Concentration A: {concentration_a}")
-    print(f"  Concentration B: {concentration_b}")
+    print("TRUE PROCESS: Tilted Binomial")
     print(f"  Participants:    {num_participants}")
     print("\nMODELS: Beta-Binomial")
-    print(f"  Nominal α={alpha_nominal:.1f}:   Bayes Posterior")
+    print(f"  Nominal α={alpha_nominal:.1f}:    Bayes Posterior")
     print(f"  Robust  α={alpha_robust:.1f}:    Robust Posterior")
     print(f"\nNumber of trials:    {num_trials}")
     print("=" * 80)
@@ -166,23 +177,24 @@ if __name__ == "__main__":
         key_theta, key_design, key_obs_opt_nom, key_obs_opt_rob, key_obs_rand = jr.split(rng_key, 5)
 
         # Sample True Parameter from prior
-        theta_true = prior.sample(key_theta)
+        theta_true = proc_prior.sample(key_theta)
 
         # --- Optimal Designs ---
-        x_opt_nom = process.sample(key_obs_opt_nom, design_opt_nominal, theta_true)
-        x_opt_rob = process.sample(key_obs_opt_rob, design_opt_robust, theta_true)
+        x_opt_nom = proc_lklhd.sample(key_obs_opt_nom, design_opt_nominal, theta_true)
+        x_opt_rob = proc_lklhd.sample(key_obs_opt_rob, design_opt_robust, theta_true)
 
         # --- Random Design ---
         design_rand = generate_random_design(key_design, num_participants)
-        x_rand = process.sample(key_obs_rand, design_rand, theta_true)
+        x_rand = proc_lklhd.sample(key_obs_rand, design_rand, theta_true)
 
         # Compute Bayes Posteriors
-        post_opt_nom = abtest.get_tilted_posterior(x_opt_nom, design_opt_nominal, alpha_nominal)
-        post_opt_rob = abtest.get_tilted_posterior(x_opt_rob, design_opt_robust, alpha_robust)
-        post_rand_nom = abtest.get_tilted_posterior(x_rand, design_rand, alpha_nominal)
-        post_rand_rob = abtest.get_tilted_posterior(x_rand, design_rand, alpha_robust)
+        post_opt_nom = model.get_tilted_posterior(x_opt_nom, design_opt_nominal, alpha_nominal)
+        post_opt_rob = model.get_tilted_posterior(x_opt_rob, design_opt_robust, alpha_robust)
+        post_rand_nom = model.get_tilted_posterior(x_rand, design_rand, alpha_nominal)
+        post_rand_rob = model.get_tilted_posterior(x_rand, design_rand, alpha_robust)
 
         # Compute CDF values
+        # Shape: (4, 2) where 2 is [Group A, Group B]
         return jnp.array([
             compute_marginal_cdf(post_opt_nom, theta_true),
             compute_marginal_cdf(post_opt_rob, theta_true),
@@ -194,7 +206,7 @@ if __name__ == "__main__":
     trial_keys = jr.split(rng_key, num_trials)
     results = jax.jit(jax.vmap(run_single_trial))(trial_keys)
 
-    # Extract and flatten results
+    # Extract and flatten results for Aggregate Curves
     # results shape: (num_trials, 4, 2) -> (opt_nom, opt_rob, rand_nom, rand_rob)
     cdf_opt_nominal = results[:, 0, :].flatten()
     cdf_opt_robust = results[:, 1, :].flatten()
@@ -216,7 +228,7 @@ if __name__ == "__main__":
     curve_rand_rob = compute_calibration_curve(cdf_rand_robust, expected_levels)
 
     # Write plotted data to CSV
-    csv_path = "examples/ab_testing/data/abtesting_mixture_coverage.csv"
+    csv_path = "examples/ab_testing/data/abtesting_coverage.csv"
     with open(csv_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([
@@ -248,12 +260,12 @@ if __name__ == "__main__":
     print("RESULTS: 95% Credible Interval Coverage")
     print("=" * 80)
 
-    print("\nOPTIMIZED DESIGN")
+    print("\nOPTIMIZED DESIGN (Aggregate)")
     print("-" * 30)
     print(f"  Nominal (α={alpha_nominal:.1f}):     {100*cov_95_opt_nom:.1f}%")
     print(f"  Robust  (α={alpha_robust:.1f}):     {100*cov_95_opt_rob:.1f}%")
 
-    print("\nRANDOM DESIGN")
+    print("\nRANDOM DESIGN (Aggregate)")
     print("-" * 30)
     print(f"  Nominal (α={alpha_nominal:.1f}):     {100*cov_95_rand_nom:.1f}%")
     print(f"  Robust  (α={alpha_robust:.1f}):     {100*cov_95_rand_rob:.1f}%")
