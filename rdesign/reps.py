@@ -2,14 +2,12 @@ from typing import Callable
 from functools import partial
 
 import jax
-import optax
 
 from jax import Array, random, numpy as jnp
 from flax.training.train_state import TrainState
-from distrax import Lambda
 
+from rdesign.policy import Policy
 from rdesign.base import REPSConfig, StepInfo, OptimizationResult
-from rdesign.policy import Policy, GaussianParams
 from rdesign.utils import batch_samples, log_progress, inv_sqrt_schedule
 
 
@@ -62,17 +60,11 @@ def optimize_policy(
     config: REPSConfig,
 ) -> OptimizationResult:
     """
-    Optimize a policy using REPS as mirror descent.
-
-    This implements policy optimization as mirror descent in the space of
-    distributions, where each iteration:
-        1. Samples from current policy
-        2. Computes importance weights via softmax: w_i ∝ exp(f(x_i) / tau)
-        3. Projects back to policy family via weighted MLE
+    Optimize a policy using REPS as policy search method.
 
     Args:
         rng_key: JAX PRNG key for stochastic sampling.
-        func: Objective function to maximize. Maps samples to scalar values.
+        func: Objective function to maximize. Maps (key, sample) to scalar value.
         policy: Policy defining the search distribution family.
         policy_state: Initial training state containing policy parameters.
         config: REPS configuration.
@@ -82,20 +74,21 @@ def optimize_policy(
     """
     history: dict[str, list] = {"value": [], "entropy": [], "temperature": []}
 
-    def mirror_descent_step(
+    def optimization_step(
         rng_key: Array,
         policy_state: TrainState,
         iteration: int,
     ) -> tuple[TrainState, StepInfo]:
-        """Single mirror descent iteration."""
-        sample_key, batch_key = random.split(rng_key)
+        """Single REPS iteration."""
+        sample_key, func_key, batch_key = random.split(rng_key, 3)
 
         # Sample from current policy
         sample_keys = random.split(sample_key, config.num_samples)
-        samples = jax.vmap(lambda k: policy.sample(k, policy_state.params))(sample_keys)
+        samples, log_probs = jax.vmap(lambda k: policy.sample_and_log_prob(k, policy_state.params))(sample_keys)
 
         # Evaluate objective
-        values = jax.vmap(func)(samples)
+        func_keys = random.split(func_key, config.num_samples)
+        values = jax.vmap(lambda k, s, lp: func(k, s, lp, config.lmbda))(func_keys, samples, log_probs)
 
         # Compute temperature and importance weights
         tau = inv_sqrt_schedule(t=iteration, tau_init=1.0)
@@ -123,10 +116,10 @@ def optimize_policy(
             temperature=tau,
         )
 
-    # Mirror descent loop
+    # Policy search loop
     for iteration in range(config.max_iterations):
         rng_key, step_key = random.split(rng_key)
-        policy_state, info = mirror_descent_step(step_key, policy_state, iteration)
+        policy_state, info = optimization_step(step_key, policy_state, iteration)
 
         history["value"].append(float(info.mean_value))
         history["entropy"].append(float(info.entropy))
@@ -145,47 +138,3 @@ def optimize_policy(
         )
 
     return OptimizationResult(policy_state=policy_state, history=history)
-
-
-def main():
-    dim = 2
-    rng_key = jax.random.PRNGKey(0)
-    init_key, opt_key = jax.random.split(rng_key)
-
-    # Configure REPS as mirror descent
-    config = REPSConfig(
-        num_samples=100,
-        batch_size=16,
-        max_iterations=500,
-        log_interval=50,
-    )
-
-    # Create policy with custom initialization
-    params_module = GaussianParams(
-        dim=dim,
-        init_mean=lambda key, shape: 2.5 * jnp.ones((dim,)),
-        init_log_std=lambda key, shape: jnp.zeros((dim,)),
-    )
-    policy = GaussianPolicy(params_module, bijector=Lambda(lambda x: x))
-
-    # Initialize policy state
-    optimizer = optax.adam(learning_rate=0.01)
-    policy_state = policy.init_state(init_key, optimizer)
-
-    # Define objective (maximize negative quadratic -> find origin)
-    objective = lambda x: -0.5 * jnp.dot(x, x)
-
-    # Run optimization
-    result = optimize_policy(
-        rng_key=opt_key,
-        func=objective,
-        policy=policy,
-        policy_state=policy_state,
-        config=config,
-    )
-
-    print(f"\nFinal mean: {result.policy_state.params['mean']}")
-
-
-if __name__ == "__main__":
-    main()
