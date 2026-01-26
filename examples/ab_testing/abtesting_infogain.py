@@ -111,7 +111,7 @@ xi = model.optimal_design_sibson(alpha_robust)
 # Calculate the Promise (Robust EIG under nominal model)
 # ============================================================================
 
-# The "Promise" is the worst-case guarantee we optimize for during design
+# Robust EIG under nominal model
 promise_eig = model.sibson_mi(xi, alpha_robust)
 
 print(f"\nTHE GUARANTEE (Promise)")
@@ -134,18 +134,15 @@ def run_trial(key):
     # 2. Generate Data from True Process (Tilted Likelihood)
     y = proc_lklhd.sample(process_key, xi, theta)
 
-    # 3. Oracle: KL divergence using tilted posterior with the TRUE alpha
-    # This represents the information gain if we knew the true misspecification level
+    # Oracle: KL divergence using tilted posterior with the TRUE alpha
     oracle_posterior = model.get_tilted_posterior(y, xi, alpha_true)
     ig_oracle = oracle_posterior.kl_to(model.prior)
 
-    # 4. Nominal: KL divergence using standard Bayes posterior (alpha=1.0)
-    # This is what a naive practitioner thinks they gained
+    # Nominal: KL divergence using standard Bayes posterior (alpha=1.0)
     bayes_posterior = model.get_bayes_posterior(y, xi)
     ig_nominal = bayes_posterior.kl_to(model.prior)
 
-    # 5. Robust: Rényi IG using nominal model with robust alpha
-    # This is the robust utility we actually optimized
+    # Robust: Rényi IG using nominal model with robust alpha
     ig_robust = model.renyi_ig(y, xi, alpha_robust)
 
     return jnp.array([ig_oracle, ig_nominal, ig_robust])
