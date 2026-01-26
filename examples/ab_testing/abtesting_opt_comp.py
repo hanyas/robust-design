@@ -1,5 +1,5 @@
 """
-Comparative Evaluation: Stochastic Enumeration vs. Discrete REPS for A/B Testing
+Comparative Evaluation: Enumeration vs. Discrete REPS for A/B Testing
 """
 from typing import Tuple, Callable
 import csv
@@ -45,12 +45,12 @@ NUM_OUTER = 16
 NUM_INNER = 16
 
 # Evaluation Settings
-NUM_TRIALS_ENUM = 1024    # Number of independent enumeration runs
+NUM_TRIALS_ENUM = 1024   # Number of independent enumeration runs
 NUM_SAMPLES_REPS = 1024  # Number of samples from the policy
 
 
 # =============================================================================
-# 3. Deterministic Optimizer (Enumeration)
+# 3. Deterministic Optimizer 
 # =============================================================================
 
 def run_enumeration(num_trials: int, seed: int = 42):
@@ -62,11 +62,7 @@ def run_enumeration(num_trials: int, seed: int = 42):
 
     designs = jnp.arange(NUM_PARTICIPANTS + 1, dtype=jnp.float64)
 
-    def find_best_single(rng_key):
-        # We need a different key for each design to see the effect of noise?
-        # Actually, the user says "pass a different key everytime" for the optimizer.
-        # This usually means the optimizer sees a noisy landscape.
-        
+    def find_best_single(rng_key):        
         # Vectorize objective evaluation over all designs
         keys = jr.split(rng_key, NUM_PARTICIPANTS + 1)
         
@@ -143,6 +139,7 @@ print("="*80)
 print("\nComputing ground truth...")
 gt_designs = jnp.arange(NUM_PARTICIPANTS + 1, dtype=jnp.float64)
 gt_vals = jax.vmap(lambda d: model.sibson_mi(d, ALPHA))(gt_designs)
+
 true_opt_idx = jnp.argmax(gt_vals)
 true_opt_design = gt_designs[true_opt_idx]
 true_max_val = gt_vals[true_opt_idx]
@@ -152,6 +149,16 @@ def compute_regret(designs):
     """Compute regret against true optimal value."""
     found_vals = jax.vmap(lambda d: model.sibson_mi(d, ALPHA))(designs)
     return true_max_val - found_vals
+
+
+def save_histogram_csv(filename, bin_centers, count1, count2, header):
+    """Helper to save histogram data to CSV."""
+    with open(filename, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(header)
+        for bc, c1, c2 in zip(bin_centers, count1, count2):
+            writer.writerow([bc, c1, c2])
+    print(f"Data saved to {filename}")
 
 # A. Run Enumeration
 enum_designs = run_enumeration(NUM_TRIALS_ENUM)
@@ -171,19 +178,40 @@ print("\n" + "="*80)
 print("COMPARISON RESULTS")
 print("="*80)
 
+enum_saturation = enum_designs / NUM_PARTICIPANTS
+reps_saturation = reps_designs / NUM_PARTICIPANTS
+
 print(f"Enumeration | Mean Regret: {jnp.mean(enum_regrets):.4f} | Std: {jnp.std(enum_regrets):.4f} | Worst: {jnp.max(enum_regrets):.4f}")
 print(f"REPS        | Mean Regret: {jnp.mean(reps_regrets):.4f} | Std: {jnp.std(reps_regrets):.4f} | Worst: {jnp.max(reps_regrets):.4f}")
 
-# D. Save Data to CSV
-data_path = "examples/ab_testing/data/abtesting_opt_comp.csv"
-with open(data_path, "w", newline="") as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow(["method", "design", "regret"])
-    for d, r in zip(enum_designs, enum_regrets):
-        writer.writerow(["enumeration", float(d), float(r)])
-    for d, r in zip(reps_designs, reps_regrets):
-        writer.writerow(["reps", float(d), float(r)])
-print(f"\nData saved to {data_path}")
+print(f"Enumeration | Mean Saturation: {jnp.mean(enum_saturation):.4f}")
+print(f"REPS        | Mean Saturation: {jnp.mean(reps_saturation):.4f}")
+
+# D. Save Histograms to CSV
+
+# 1. Regret Histogram
+regret_bins = jnp.linspace(0, float(jnp.maximum(jnp.max(enum_regrets), jnp.max(reps_regrets))), 20)
+enum_hist, _ = jnp.histogram(enum_regrets, bins=regret_bins)
+reps_hist, _ = jnp.histogram(reps_regrets, bins=regret_bins)
+regret_bin_centers = (regret_bins[:-1] + regret_bins[1:]) / 2
+
+save_histogram_csv(
+    "examples/ab_testing/data/abtesting_regret.csv",
+    regret_bin_centers, enum_hist, reps_hist,
+    ["bin_center", "enum_density", "reps_density"]
+)
+
+# 2. Saturation Histogram
+sat_bins = jnp.linspace(0, 1.0, NUM_PARTICIPANTS + 1)
+enum_sat_hist, _ = jnp.histogram(enum_saturation, bins=sat_bins)
+reps_sat_hist, _ = jnp.histogram(reps_saturation, bins=sat_bins)
+sat_bin_centers = (sat_bins[:-1] + sat_bins[1:]) / 2
+
+save_histogram_csv(
+    "examples/ab_testing/data/abtesting_saturation.csv",
+    sat_bin_centers, enum_sat_hist, reps_sat_hist,
+    ["bin_center", "enum_density", "reps_density"]
+)
 
 # E. Plotting
 fig, axes = plt.subplots(1, 2, figsize=(14, 6))
