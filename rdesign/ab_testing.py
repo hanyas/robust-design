@@ -125,15 +125,15 @@ class TiltedBetaBinomial(NamedTuple):
             # 2. Compute log-normalizers
             # Grid of all possible outcomes [0...max_n]
             k_grid = jnp.arange(self.max_n + 1, dtype=jnp.float32)
-            
+
             # vmap grid computation over groups
             # Result shape: (2, max_n+1)
             log_grid = jax.vmap(lambda n, d, g: self._log_tilted_kernel(k_grid, n, d, g))(
                 self.trials, self.delta, self.gamma
             )
-            
+
             log_Z = logsumexp(log_grid, axis=-1)
-            
+
             return jnp.sum(log_unnorm - log_Z)
 
         # Branch for stability near alpha=1
@@ -141,7 +141,7 @@ class TiltedBetaBinomial(NamedTuple):
 
     def sample(self, rng_key: Array) -> Array:
         """Sample from the discrete tilted marginal."""
-        
+
         def standard_sample(k):
             key_theta, key_x = jr.split(k)
             theta = jr.beta(key_theta, self.delta, self.gamma)
@@ -149,7 +149,7 @@ class TiltedBetaBinomial(NamedTuple):
 
         def tilted_sample(k):
             k_grid = jnp.arange(self.max_n + 1, dtype=jnp.float32)
-            
+
             # Helper to sample one group
             def sample_group(key, n, d, g):
                 logits = self._log_tilted_kernel(k_grid, n, d, g)
@@ -173,6 +173,16 @@ class Binomial(NamedTuple):
         n_a = design
         n_b = self.num_participants - design
         return jnp.array([n_a, n_b], dtype=jnp.float32)
+
+    def sample(self, rng_key: Array, design: Array, theta: Array) -> Array:
+        """Sample from Binomial(n, θ)."""
+        trials = self.get_trials(design)
+        return jr.binomial(rng_key, trials.astype(int), theta)
+
+    def logpdf(self, x: Array, design: Array, theta: Array) -> Array:
+        """Compute log p(x | design, θ)."""
+        trials = self.get_trials(design)
+        return jnp.sum(jax.scipy.stats.binom.logpmf(x, trials, theta))
 
 
 class ABTesting(NamedTuple):
@@ -209,9 +219,9 @@ class ABTesting(NamedTuple):
             gamma=self.prior.gamma + trials - x
         )
 
-    def get_prior_predictive(self, design: Array) -> BetaBinomial:
+    def get_marginal(self, design: Array) -> BetaBinomial:
         """
-        Compute prior predictive p(x | ξ).
+        Compute marginal p(x | ξ).
         Returns a BetaBinomial distribution.
         """
         trials = self.likelihood.get_trials(design)
@@ -322,17 +332,17 @@ class ABTesting(NamedTuple):
 
     def sibson_mi(self, design: Array, alpha: Array) -> Array:
         """
-        Compute Sibson's α-mutual information I^S_α(θ; x | ξ).        
+        Compute Sibson's α-mutual information I^S_α(θ; x | ξ).
         """
-        
+
         trials = self.likelihood.get_trials(design)
         n_a, n_b = trials[0], trials[1]
-        
+
         # 1. Define the log-normalizer as a pure function of alpha
         def log_normalizer_fn(a):
             # Re-instantiate marginal with dynamic alpha to trace gradients
             marginal = self.get_tilted_marginal(design, a)
-            
+
             # Compute log Z for both groups
             lz_a = marginal.log_normalizer(n_a, self.prior.delta[0], self.prior.gamma[0])
             lz_b = marginal.log_normalizer(n_b, self.prior.delta[1], self.prior.gamma[1])
@@ -345,13 +355,13 @@ class ABTesting(NamedTuple):
         # 3. Define the standard Sibson calculation
         def sibson_standard():
             # Clip safe_alpha to avoid division by zero in the non-limit branch
-            safe_alpha = jnp.where(jnp.isclose(alpha, 1.0), 0.5, alpha) 
+            safe_alpha = jnp.where(jnp.isclose(alpha, 1.0), 0.5, alpha)
             log_z = log_normalizer_fn(safe_alpha)
             return (safe_alpha / (safe_alpha - 1.0)) * log_z
 
         # 4. Switch based on proximity to 1.0
         is_shannon = jnp.isclose(alpha, 1.0, atol=1e-3)
-        
+
         return jax.lax.cond(
             is_shannon,
             lambda _: shannon_via_grad(),

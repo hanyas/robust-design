@@ -1,10 +1,5 @@
 """
 Conjugate Linear Regression for Robust Bayesian Experimental Design
-
-This module implements a conjugate linear regression model with support for:
-- Standard Bayesian inference (prior, likelihood, posterior)
-- Robust experimental design using Sibson's α-mutual information
-- Worst-case generative processes under model misspecification
 """
 
 from typing import NamedTuple
@@ -12,6 +7,8 @@ from typing import NamedTuple
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
+
+from jax.scipy.stats import multivariate_normal
 
 from rdesign.distributions import Gaussian
 
@@ -21,22 +18,22 @@ class LinearGaussian(NamedTuple):
     Gaussian linear likelihood for regression.
 
     Args:
-        noise_stddev: Observation noise standard deviation σ
+        noise_stddev: Observation noise standard deviation σ.
     """
     noise_stddev: float
 
     def design_matrix(self, design: Array) -> Array:
         """
-        Construct augmented design matrix H(ξ) = [ξ, 1].
+        Construct the design matrix H(ξ).
 
         Args:
-            design: Design points ξ, shape (N,) or scalar
+            design: Raw design array.
 
         Returns:
-            Design matrix H(ξ), shape (N, 2)
+            Design matrix H(ξ), shape (N, D)
         """
-        design = jnp.atleast_1d(design)
         size = design.shape[0]
+        design = jnp.atleast_1d(design)
         return jnp.column_stack([design, jnp.ones(size)])
 
     def sample(self, rng_key: Array, design: Array, theta: Array) -> Array:
@@ -44,12 +41,12 @@ class LinearGaussian(NamedTuple):
         Sample from the likelihood p(x | θ, ξ).
 
         Args:
-            rng_key: Random key
-            design: Design points, shape (N,)
-            theta: Parameters, shape (2,)
+            rng_key: Random key.
+            design: Raw design array.
+            theta: Parameters, shape (D,).
 
         Returns:
-            Observations, shape (N,)
+            Observations, shape (N,).
         """
         mean = self.mean(design, theta)
         cov = self.cov(design)
@@ -60,14 +57,13 @@ class LinearGaussian(NamedTuple):
         Compute log p(x | θ, ξ).
 
         Args:
-            x: Observations, shape (N,)
-            design: Design points, shape (N,)
-            theta: Parameters, shape (2,)
+            x: Observations, shape (N,).
+            design: Raw design array.
+            theta: Parameters, shape (D,).
 
         Returns:
-            Log likelihood scalar
+            Log likelihood scalar.
         """
-        from jax.scipy.stats import multivariate_normal
 
         mean = self.mean(design, theta)
         cov = self.cov(design)
@@ -78,11 +74,11 @@ class LinearGaussian(NamedTuple):
         Compute the mean of p(x | θ, ξ) = H(ξ)θ.
 
         Args:
-            design: Design points, shape (N,)
-            theta: Parameters, shape (2,)
+            design: Raw design array.
+            theta: Parameters, shape (D,).
 
         Returns:
-            Mean, shape (N,)
+            Mean, shape (N,).
         """
         H = self.design_matrix(design)
         return H @ theta
@@ -92,25 +88,22 @@ class LinearGaussian(NamedTuple):
         Compute the covariance of p(x | θ, ξ).
 
         Args:
-            design: Design points, shape (N,)
+            design: Raw design array.
 
         Returns:
-            Covariance matrix, shape (N, N)
+            Covariance matrix, shape (N, N).
         """
-        size = jnp.atleast_1d(design).shape[0]
-        return self.noise_stddev**2 * jnp.eye(size)
+        num_observations = self.design_matrix(design).shape[0]
+        return self.noise_stddev**2 * jnp.eye(num_observations)
 
 
 class LinearRegression(NamedTuple):
     """
     Conjugate Linear Regression Model for Robust Experimental Design.
 
-    This is a stateless factory that constructs distributions on demand.
-    All methods are pure functions with no side effects.
-
     Args:
-        prior: Gaussian prior over parameters θ
-        likelihood: Gaussian linear likelihood p(x | θ, ξ)
+        prior: Gaussian prior over parameters θ.
+        likelihood: Gaussian linear likelihood p(x | θ, ξ).
     """
     prior: Gaussian
     likelihood: LinearGaussian
@@ -124,11 +117,11 @@ class LinearRegression(NamedTuple):
         Compute Bayes posterior distribution p(θ | x, ξ).
 
         Args:
-            x: Observations, shape (N,)
-            design: Design points, shape (N,)
+            x: Observations, shape (N,).
+            design: Raw design array.
 
         Returns:
-            Gaussian distribution
+            Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
         prior_prec = jnp.linalg.inv(self.prior.cov)
@@ -148,15 +141,15 @@ class LinearRegression(NamedTuple):
 
         return Gaussian(mean=posterior_mean, cov=posterior_cov)
 
-    def get_prior_predictive(self, design: Array) -> Gaussian:
+    def get_marginal(self, design: Array) -> Gaussian:
         """
-        Compute prior predictive distribution p(x | ξ).
+        Compute marginal distribution p(x | ξ).
 
         Args:
-            design: Design points, shape (N,)
+            design: Raw design array.
 
         Returns:
-            Gaussian distribution
+            Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
         return Gaussian(
@@ -169,12 +162,12 @@ class LinearRegression(NamedTuple):
         Compute posterior predictive distribution p(x_new | x, ξ, ξ_new).
 
         Args:
-            posterior: Posterior distribution
-            design: Design points ξ, shape (N,)
-            alpha: Misspecification order α ∈ (0, 1)
+            posterior: Posterior distribution.
+            design: Raw design array.
+            alpha: Misspecification order α ∈ (0, 1).
 
         Returns:
-            Gaussian distribution
+            Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
         return Gaussian(
@@ -191,11 +184,11 @@ class LinearRegression(NamedTuple):
         Compute α-tilted marginal distribution pₐ(x | ξ).
 
         Args:
-            design: Design points, shape (N,)
-            alpha: Misspecification order α ∈ (0, 1)
+            design: Raw design array.
+            alpha: Misspecification order α ∈ (0, 1).
 
         Returns:
-            Gaussian distribution
+            Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
         return Gaussian(
@@ -208,12 +201,12 @@ class LinearRegression(NamedTuple):
         Compute α-tilted posterior distribution q(θ | x, ξ).
 
         Args:
-            x: Observations, shape (N,)
-            design: Design points, shape (N,)
-            alpha: Misspecification order α ∈ (0, 1)
+            x: Observations, shape (N,).
+            design: Raw design array.
+            alpha: Misspecification order α ∈ (0, 1).
 
         Returns:
-            Gaussian α-tilted posterior distribution
+            Gaussian α-tilted posterior distribution.
         """
         H = self.likelihood.design_matrix(design)
         prior_prec = self.prior.precision()
@@ -238,11 +231,11 @@ class LinearRegression(NamedTuple):
         Compute α-tilted joint distribution q(θ, x | ξ).
 
         Args:
-            design: Design points, shape (N,)
-            alpha: Misspecification order α ∈ (0, 1)
+            design: Raw design array.
+            alpha: Misspecification order α ∈ (0, 1).
 
         Returns:
-            Gaussian α-tilted joint distribution over [θ, x]
+            Gaussian α-tilted joint distribution over [θ, x].
         """
         H = self.likelihood.design_matrix(design)
         prior_prec = self.prior.precision()
@@ -282,15 +275,15 @@ class LinearRegression(NamedTuple):
         Compute Shannon's mutual information I(θ; x | ξ).
 
         Args:
-            design: Design points, shape (N,)
+            design: Raw design array.
 
         Returns:
-            Shannon's mutual information in nats
+            Shannon's mutual information in nats.
         """
-        size = jnp.atleast_1d(design).shape[0]
+        num_observations = self.likelihood.design_matrix(design).shape[0]
         predictive = self.get_prior_predictive(design)
         log_det_pred = jnp.linalg.slogdet(predictive.cov)[1]
-        log_det_noise = size * jnp.log(self.likelihood.noise_stddev**2)
+        log_det_noise = num_observations * jnp.log(self.likelihood.noise_stddev**2)
 
         return 0.5 * (log_det_pred - log_det_noise)
 
@@ -299,17 +292,17 @@ class LinearRegression(NamedTuple):
         Compute Sibson's α-mutual information I^S_α(θ; x | ξ).
 
         Args:
-            design: Design points, shape (N,)
-            alpha: Misspecification order α ∈ (0, 1)
+            design: Raw design array.
+            alpha: Misspecification order α ∈ (0, 1).
 
         Returns:
-            Sibson's α-mutual information in nats
+            Sibson's α-mutual information in nats.
         """
-        size = jnp.atleast_1d(design).shape[0]
+        num_observations = self.likelihood.design_matrix(design).shape[0]
         tilted_marginal = self.get_tilted_marginal(design, alpha)
 
         log_det_tilted = jnp.linalg.slogdet(tilted_marginal.cov)[1]
-        log_det_scaled_noise = size * jnp.log(self.likelihood.noise_stddev**2)
+        log_det_scaled_noise = num_observations * jnp.log(self.likelihood.noise_stddev**2)
 
         return 0.5 * (log_det_tilted - log_det_scaled_noise)
 
@@ -318,11 +311,11 @@ class LinearRegression(NamedTuple):
         Compute information gain for a specific observation.
 
         Args:
-            x: Specific observation, shape (N,)
-            design: Design points, shape (N,)
+            x: Specific observation, shape (N,).
+            design: Raw design array.
 
         Returns:
-            KL divergence from posterior to prior in nats
+            KL divergence from posterior to prior in nats.
         """
         posterior = self.get_bayes_posterior(x, design)
         return posterior.kl_to(self.prior)
@@ -332,12 +325,12 @@ class LinearRegression(NamedTuple):
         Compute robust information gain (Rényi divergence)
 
         Args:
-            x: Specific observation, shape (N,)
-            design: Design points, shape (N,)
-            alpha: Misspecification order α ∈ (0, 1)
+            x: Specific observation, shape (N,).
+            design: Raw design array.
+            alpha: Misspecification order α ∈ (0, 1).
 
         Returns:
-            Rényi divergence in nats
+            Rényi divergence in nats.
         """
         posterior = self.get_bayes_posterior(x, design)
         return posterior.renyi_to(self.prior, alpha)
