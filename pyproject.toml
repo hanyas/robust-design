@@ -7,6 +7,7 @@ name = "rdesign"
 version = "0.0.1"
 authors = [
     {name = "Hany Abdulsamad", email = "hany@robot-learning.de"},
+    {name = "Sahel Iqbal", email = "sahel13miqbal@proton.me"},
 ]
 dependencies = [
     "typing_extensions",
