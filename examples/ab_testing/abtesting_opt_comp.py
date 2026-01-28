@@ -45,8 +45,8 @@ NUM_OUTER = 16
 NUM_INNER = 16
 
 # Evaluation Settings
-NUM_TRIALS_ENUM = 1024   # Number of independent enumeration runs
-NUM_SAMPLES_REPS = 1024  # Number of samples from the policy
+NUM_TRIALS_ENUM = 128   # Number of independent enumeration runs
+NUM_SAMPLES_REPS = 128  # Number of samples from the policy
 
 
 # =============================================================================
@@ -217,9 +217,9 @@ save_histogram_csv(
 fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
 # Plot Design Distribution
-axes[0].hist(enum_designs, bins=jnp.arange(NUM_PARTICIPANTS + 2) - 0.5, alpha=0.6, label='Enumeration', color='salmon')
-axes[0].hist(reps_designs, bins=jnp.arange(NUM_PARTICIPANTS + 2) - 0.5, alpha=0.6, label='REPS', color='skyblue')
-axes[0].axvline(true_opt_design, color='green', linestyle='--', linewidth=2, label=f'True Opt ({true_opt_design})')
+axes[0].hist(enum_designs, bins=jnp.arange(NUM_PARTICIPANTS + 2) - 0.5, alpha=0.6, label='Enumeration', color='0.65', edgecolor='black')
+axes[0].hist(reps_designs, bins=jnp.arange(NUM_PARTICIPANTS + 2) - 0.5, alpha=0.6, label='REPS', color='0.15', edgecolor='black')
+axes[0].axvline(true_opt_design, color='0.15', linestyle='--', linewidth=2, label=f'True Opt ({true_opt_design})')
 axes[0].set_xlabel('Design (n_A)')
 axes[0].set_ylabel('Count')
 axes[0].set_title('Selected Design Distribution')
@@ -229,8 +229,8 @@ axes[0].grid(True, alpha=0.3)
 # Plot Regret Distribution
 max_regret = float(jnp.maximum(jnp.max(enum_regrets), jnp.max(reps_regrets)))
 regret_bins = jnp.linspace(0, max_regret, 30)
-axes[1].hist(enum_regrets, bins=regret_bins, alpha=0.6, label='Enumeration', color='salmon')
-axes[1].hist(reps_regrets, bins=regret_bins, alpha=0.6, label='REPS', color='skyblue')
+axes[1].hist(enum_regrets, bins=regret_bins, alpha=0.6, label='Enumeration', color='0.65', edgecolor='black')
+axes[1].hist(reps_regrets, bins=regret_bins, alpha=0.6, label='REPS', color='0.15', edgecolor='black')
 axes[1].set_xlabel('Regret')
 axes[1].set_ylabel('Count')
 axes[1].set_title('Regret Distribution')

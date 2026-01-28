@@ -34,7 +34,7 @@ class HighDimLinearGaussian(LinearGaussian):
 # Settings
 DIM = 10
 NOISE_STDDEV = 1e-1
-ALPHA = 0.5
+ALPHA = 0.1
 LAMBDA = 1e6
 
 # Estimator settings
@@ -60,7 +60,7 @@ config = REPSConfig(
     num_samples=256,
     batch_size=32,
     max_iterations=1000,
-    log_interval=20,
+    log_interval=100,
     lmbda=LAMBDA
 )
 
@@ -120,15 +120,15 @@ print(f"Regret:             {regret:.4f}")
 hist = result.history
 fig, axes = plt.subplots(1, 4, figsize=(20, 5))
 
-axes[0].plot(hist["value"])
+axes[0].plot(hist["value"], color='0.15')
 axes[0].set_title("Mean Reward (MI)")
 axes[0].set_xlabel("Iteration")
 
-axes[1].plot(hist["temperature"])
+axes[1].plot(hist["temperature"], color='0.15')
 axes[1].set_title("Temperature (tau)")
 axes[1].set_xlabel("Iteration")
 
-axes[2].plot(hist["entropy"])
+axes[2].plot(hist["entropy"], color='0.15')
 axes[2].set_title("Policy Entropy")
 axes[2].set_xlabel("Iteration")
 
@@ -137,9 +137,9 @@ sample_key, _ = jr.split(run_key)
 sample_keys = jr.split(sample_key, 1024)
 many_samples = jax.vmap(lambda k: policy.sample(k, result.policy_state.params))(sample_keys)
 
-axes[3].hist(many_samples.ravel(), bins=50, color='skyblue', edgecolor='black', alpha=0.7)
-axes[3].axvline(-1.0, color='r', linestyle='--', linewidth=1)
-axes[3].axvline(1.0, color='r', linestyle='--', linewidth=1)
+axes[3].hist(many_samples.ravel(), bins=50, color='0.65', edgecolor='black', alpha=0.7)
+axes[3].axvline(-1.0, color='0.15', linestyle='--', linewidth=1)
+axes[3].axvline(1.0, color='0.15', linestyle='--', linewidth=1)
 axes[3].set_title("Policy Distribution")
 axes[3].set_xlabel("Design Value")
 

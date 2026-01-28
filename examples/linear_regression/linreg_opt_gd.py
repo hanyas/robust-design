@@ -119,17 +119,17 @@ plt.figure(figsize=(10, 5))
 
 # Subplot 1: Histogram of coordinate values
 plt.subplot(1, 2, 1)
-plt.hist(found_designs.ravel(), bins=50, color='skyblue', edgecolor='black', alpha=0.7)
-plt.axvline(-1.0, color='r', linestyle='--', linewidth=1)
-plt.axvline(1.0, color='r', linestyle='--', linewidth=1)
+plt.hist(found_designs.ravel(), bins=50, color='0.65', edgecolor='black', alpha=0.7)
+plt.axvline(-1.0, color='0.15', linestyle='--', linewidth=1)
+plt.axvline(1.0, color='0.15', linestyle='--', linewidth=1)
 plt.xlabel("Design Coordinate Values")
 plt.ylabel("Frequency")
 plt.title("Constraint Saturation")
 
 # Subplot 2: Histogram of Regret
 plt.subplot(1, 2, 2)
-plt.hist(regrets, bins=20, color='salmon', edgecolor='black', alpha=0.7)
-plt.axvline(0.0, color='g', linestyle='--', linewidth=2, label='Zero Regret')
+plt.hist(regrets, bins=20, color='0.65', edgecolor='black', alpha=0.7)
+plt.axvline(0.0, color='0.15', linestyle='--', linewidth=2, label='Zero Regret')
 plt.xlabel("Regret (True Max - Found)")
 plt.title("Optimization Shortfall")
 plt.legend()

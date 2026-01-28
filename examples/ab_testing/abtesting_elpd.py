@@ -202,7 +202,7 @@ for trial in range(num_trials):
 
     # Sample true parameter from prior
     rng_key, sub_key = jr.split(rng_key)
-    theta_true = proc_prior.sample(sub_key)
+    theta_true = proc_prior.sample(sub_key, 1)[0]
 
     # Optimal designs: sample data for each α-specific design
     rng_key, sub_keys = custom_split(rng_key, num_alphas + 1)

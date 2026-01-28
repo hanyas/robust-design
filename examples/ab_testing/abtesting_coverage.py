@@ -177,7 +177,7 @@ if __name__ == "__main__":
         key_theta, key_design, key_obs_opt_nom, key_obs_opt_rob, key_obs_rand = jr.split(rng_key, 5)
 
         # Sample True Parameter from prior
-        theta_true = proc_prior.sample(key_theta)
+        theta_true = proc_prior.sample(key_theta, 1)[0]
 
         # --- Optimal Designs ---
         x_opt_nom = proc_lklhd.sample(key_obs_opt_nom, design_opt_nominal, theta_true)

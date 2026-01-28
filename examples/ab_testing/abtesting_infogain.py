@@ -129,7 +129,7 @@ def run_trial(key):
     prior_key, process_key = jr.split(key)
 
     # 1. Sample True Parameter from Process Prior
-    theta = proc_prior.sample(prior_key)
+    theta = proc_prior.sample(prior_key, 1)[0]
 
     # 2. Generate Data from True Process (Tilted Likelihood)
     y = proc_lklhd.sample(process_key, xi, theta)
@@ -173,10 +173,6 @@ print(f"Oracle   (true utility):        {avg_oracle:.4f} nats")
 print(f"Nominal  (perceived utility): {avg_nominal:.4f} nats")
 print(f"Robust   (perceived utility): {avg_robust:.4f} nats")
 print("-" * 80)
-print(f"Objective gap  (Oracle - Promise):    {avg_oracle - promise_eig:+.4f} nats")
-print(f"Nominal gap    (Oracle - Perceived):  {avg_oracle - avg_nominal:+.4f} nats")
-print(f"Robust gap     (Oracle - Perceived):  {avg_oracle - avg_robust:+.4f} nats")
-print("=" * 80)
 
 # ============================================================================
 # Visualization

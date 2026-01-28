@@ -120,10 +120,6 @@ print(f"Oracle   (true utility):        {avg_oracle:.4f} nats")
 print(f"Nominal  (perceived utility): {avg_nominal:.4f} nats")
 print(f"Robust   (perceived utility): {avg_robust:.4f} nats")
 print("-" * 80)
-print(f"Objective gap  (Oracle - Promise):    {avg_oracle - promise_eig:+.4f} nats")
-print(f"Nominal gap   (Oracle - Perceived):  {avg_oracle - avg_nominal:+.4f} nats")
-print(f"Robust gap    (Oracle - Perceived):  {avg_oracle - avg_robust:+.4f} nats")
-print("=" * 80)
 
 # ============================================================================
 # Visualization

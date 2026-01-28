@@ -48,8 +48,8 @@ NUM_OUTER = 16
 NUM_INNER = 16
 
 # Evaluation Settings
-NUM_TRIALS_GD = 1024 # Number of independent GD runs
-NUM_SAMPLES_REPS = 1024  # Number of samples from the policy
+NUM_TRIALS_GD = 128 # Number of independent GD runs
+NUM_SAMPLES_REPS = 128  # Number of samples from the policy
 
 # =============================================================================
 # 2. Deterministic Optimizer (Gradient Descent)
@@ -228,12 +228,12 @@ save_histogram_csv(
 fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
 # Plot Regret
-axes[0].bar(regret_bin_centers, gd_hist, width=regret_bins[1]-regret_bins[0], alpha=0.6, label='Deterministic (GD)', color='salmon', edgecolor='black')
-axes[0].bar(regret_bin_centers, reps_hist, width=regret_bins[1]-regret_bins[0], alpha=0.6, label='Stochastic Policy (REPS)', color='skyblue', edgecolor='black')
+axes[0].bar(regret_bin_centers, gd_hist, width=regret_bins[1]-regret_bins[0], alpha=0.6, label='Deterministic (GD)', color='0.65', edgecolor='black')
+axes[0].bar(regret_bin_centers, reps_hist, width=regret_bins[1]-regret_bins[0], alpha=0.6, label='Stochastic Policy (REPS)', color='0.15', edgecolor='black')
 
 # Add mean lines
-axes[0].axvline(jnp.mean(gd_regrets), color='red', linestyle='--', linewidth=2, label=f'Mean GD ({jnp.mean(gd_regrets):.2f})')
-axes[0].axvline(jnp.mean(reps_regrets), color='blue', linestyle='--', linewidth=2, label=f'Mean REPS ({jnp.mean(reps_regrets):.2f})')
+axes[0].axvline(jnp.mean(gd_regrets), color='0.15', linestyle='--', linewidth=2, label=f'Mean GD ({jnp.mean(gd_regrets):.2f})')
+axes[0].axvline(jnp.mean(reps_regrets), color='0.15', linestyle='-', linewidth=2, label=f'Mean REPS ({jnp.mean(reps_regrets):.2f})')
 
 axes[0].set_xlabel('Regret')
 axes[0].set_ylabel('Frequency')
@@ -242,11 +242,11 @@ axes[0].legend()
 axes[0].grid(True, alpha=0.3)
 
 # Plot Saturation
-axes[1].bar(sat_bin_centers, gd_sat_hist, width=sat_bins[1]-sat_bins[0], alpha=0.6, label='Deterministic (GD)', color='salmon', edgecolor='black')
-axes[1].bar(sat_bin_centers, reps_sat_hist, width=sat_bins[1]-sat_bins[0], alpha=0.6, label='Stochastic Policy (REPS)', color='skyblue', edgecolor='black')
+axes[1].bar(sat_bin_centers, gd_sat_hist, width=sat_bins[1]-sat_bins[0], alpha=0.6, label='Deterministic (GD)', color='0.65', edgecolor='black')
+axes[1].bar(sat_bin_centers, reps_sat_hist, width=sat_bins[1]-sat_bins[0], alpha=0.6, label='Stochastic Policy (REPS)', color='0.15', edgecolor='black')
 
-axes[1].axvline(jnp.mean(gd_saturation), color='red', linestyle='--', linewidth=2, label=f'Mean GD ({jnp.mean(gd_saturation):.2f})')
-axes[1].axvline(jnp.mean(reps_saturation), color='blue', linestyle='--', linewidth=2, label=f'Mean REPS ({jnp.mean(reps_saturation):.2f})')
+axes[1].axvline(jnp.mean(gd_saturation), color='0.15', linestyle='--', linewidth=2, label=f'Mean GD ({jnp.mean(gd_saturation):.2f})')
+axes[1].axvline(jnp.mean(reps_saturation), color='0.15', linestyle='-', linewidth=2, label=f'Mean REPS ({jnp.mean(reps_saturation):.2f})')
 
 axes[1].set_xlabel('Mean Absolute Design Value (Saturation)')
 axes[1].set_ylabel('Frequency')
