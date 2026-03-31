@@ -306,6 +306,27 @@ class LinearRegression(NamedTuple):
 
         return 0.5 * (log_det_tilted - log_det_scaled_noise)
 
+    def power_geig(self, design: Array, omega: float) -> float:
+        """
+        Compute the exact power-likelihood Gibbs EIG for linear-Gaussian design.
+
+        For a Gaussian likelihood with fixed noise variance, the power-likelihood
+        Gibbs EIG is a design-independent rescaling of the Sibson objective:
+
+            EIG_Gibbs(ξ; ω) = c(ω, N, σ^2) * I^S_ω(θ; x | ξ),
+
+        where N is the number of observations in the batch. The proportionality
+        is exact, so Power-GEIG and Sibson induce the same optimal designs in
+        this conjugate setting.
+        """
+        num_observations = self.likelihood.design_matrix(design).shape[0]
+        noise_var = self.likelihood.noise_stddev ** 2
+        scale = (
+            (2.0 * jnp.pi * noise_var) ** (0.5 * num_observations * (1.0 - omega))
+            * omega ** (-0.5 * num_observations)
+        )
+        return scale * self.sibson_mi(design, omega)
+
     def shannon_ig(self, x: Array, design: Array) -> float:
         """
         Compute information gain for a specific observation.

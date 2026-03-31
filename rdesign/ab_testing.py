@@ -48,6 +48,10 @@ class BetaBinomial(NamedTuple):
         # Sum over groups
         return jnp.sum(jnp.where(self.trials > 0, log_binom + log_beta_ratio, 0.0))
 
+    def logpdf(self, x: Array) -> float:
+        """Compatibility alias for codepaths that expect `logpdf`."""
+        return self.logpmf(x)
+
     def sample(self, rng_key: Array, shape: tuple = ()) -> Array:
         """Sample from Beta-Binomial via hierarchical sampling."""
         key_theta, key_x = jr.split(rng_key)
@@ -138,6 +142,10 @@ class TiltedBetaBinomial(NamedTuple):
 
         # Branch for stability near alpha=1
         return jax.lax.cond(jnp.abs(self.alpha - 1.0) < 1e-3, standard_logpmf, tilted_logpmf, x)
+
+    def logpdf(self, x: Array) -> Array:
+        """Compatibility alias for codepaths that expect `logpdf`."""
+        return self.logpmf(x)
 
     def sample(self, rng_key: Array) -> Array:
         """Sample from the discrete tilted marginal."""
@@ -368,6 +376,56 @@ class ABTesting(NamedTuple):
             lambda _: sibson_standard(),
             operand=None
         )
+
+    def power_geig(self, design: Array, omega: Array) -> Array:
+        """
+        Compute the exact power-likelihood Gibbs EIG for the Beta-Binomial model.
+
+        This corresponds to the Gibbs EIG induced by the negative log-likelihood
+        loss with learning rate ω, evaluated under the nominal Beta-Binomial
+        model without Monte Carlo approximation.
+        """
+        trials = self.likelihood.get_trials(design)
+        max_n = self.likelihood.num_participants
+
+        def _group_power_geig(n: Array, d: Array, g: Array) -> Tuple[Array, Array]:
+            k_vals = jnp.arange(max_n + 1, dtype=jnp.float64)
+            mask = (k_vals >= 0) & (k_vals <= n)
+
+            safe_k = jnp.where(mask, k_vals, 0.0)
+            safe_n_minus_k = jnp.where(mask, n - safe_k, 0.0)
+
+            log_binom = (
+                gammaln(n + 1.0)
+                - gammaln(safe_k + 1.0)
+                - gammaln(safe_n_minus_k + 1.0)
+            )
+
+            a = d + omega * safe_k
+            b = g + omega * safe_n_minus_k
+
+            safe_log_m = omega * log_binom + betaln(a, b) - betaln(d, g)
+            safe_log_m = jnp.where(mask, safe_log_m, 0.0)
+
+            m_vals = jnp.where(mask, jnp.exp(safe_log_m), 0.0)
+            expected_log_like = (
+                omega * log_binom
+                + omega * safe_k * (digamma(a) - digamma(a + b))
+                + omega * safe_n_minus_k * (digamma(b) - digamma(a + b))
+            )
+            expected_log_like = jnp.where(mask, expected_log_like, 0.0)
+
+            group_gain = jnp.sum(jnp.where(mask, m_vals * (expected_log_like - safe_log_m), 0.0))
+            group_mass = jnp.sum(m_vals)
+            return group_gain, group_mass
+
+        gain_a, mass_a = _group_power_geig(
+            trials[0], self.prior.delta[0], self.prior.gamma[0]
+        )
+        gain_b, mass_b = _group_power_geig(
+            trials[1], self.prior.delta[1], self.prior.gamma[1]
+        )
+        return gain_a * mass_b + mass_a * gain_b
 
     def shannon_ig(self, x: Array, design: Array) -> Array:
         """
