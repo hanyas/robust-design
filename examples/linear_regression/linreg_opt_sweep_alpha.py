@@ -15,7 +15,7 @@ from rdesign.linear_regression import LinearGaussian
 from rdesign.linear_regression import LinearRegression
 
 from rdesign.base import REPSConfig
-from rdesign.utils import nested_mc_sibson_mi
+from rdesign.utils import nested_mc_sibson_mi_with_marginal as nested_mc_sibson_mi
 from rdesign.policy import BoxGaussian
 from rdesign.reps import optimize_policy
 from rdesign.bijectors import Tanh
@@ -94,8 +94,8 @@ def run_policy_search(alpha: float, seed: int = 42):
     config = REPSConfig(
         num_samples=256,
         batch_size=32,
-        max_iterations=1000,
-        log_interval=10000, # Silence logs
+        max_iterations=2500,
+        log_interval=10000,  # Silence logs
         verbose=False,
         lmbda=LAMBDA
     )
@@ -170,7 +170,7 @@ for alpha in alphas:
     })
 
 # Save to CSV
-csv_path = "examples/linear_regression/data/linreg_sweep_alpha.csv"
+csv_path = "data/linreg_sweep_alpha_new.csv"
 fieldnames = ["alpha", "gd_mean", "gd_p10", "gd_p50", "gd_p90", "reps_mean", "reps_p10", "reps_p50", "reps_p90"]
 
 with open(csv_path, "w", newline="") as f:

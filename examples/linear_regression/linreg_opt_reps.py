@@ -14,7 +14,7 @@ from rdesign.linear_regression import LinearGaussian
 from rdesign.linear_regression import LinearRegression
 
 from rdesign.base import REPSConfig
-from rdesign.utils import nested_mc_sibson_mi
+from rdesign.utils import nested_mc_sibson_mi_with_marginal as nested_sibson_mi
 from rdesign.policy import BoxGaussian
 from rdesign.reps import optimize_policy
 from rdesign.bijectors import Tanh
@@ -39,7 +39,7 @@ LAMBDA = 1e6
 
 # Estimator settings
 NUM_OUTER = 16
-NUM_INNER = 16
+NUM_INNER = 32
 
 # Setup Model
 vars = jnp.linspace(1.0, 10.0, DIM)
@@ -66,7 +66,7 @@ config = REPSConfig(
 
 # Define objective function for REPS
 def objective_fn(key: Array, design: Array, log_prob: Array, lmbda: float) -> float:
-    mi = nested_mc_sibson_mi(
+    mi = nested_sibson_mi(
         rng_key=key,
         model=model,
         design=design,

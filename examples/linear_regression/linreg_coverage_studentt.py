@@ -11,12 +11,56 @@ from scipy.stats import chi2   # chi2.ppf is not supported in JAX
 import csv
 
 from rdesign.distributions import Gaussian
-from rdesign.linear_regression import LinearGaussian
-from rdesign.linear_regression import LinearRegression
+from rdesign.linear_regression import LinearGaussian, LinearRegression
 
 import matplotlib.pyplot as plt
 
 jax.config.update("jax_enable_x64", True)
+
+
+class LinearStudentT(NamedTuple):
+    """
+    Student-t linear likelihood for regression
+
+    Args:
+        noise_stddev: Noise standard deviation
+        df: Degrees of freedom
+    """
+    df: float
+    noise_stddev: float
+
+    def design_matrix(self, design: Array) -> Array:
+        """Construct augmented design matrix H(ξ) = [ξ, 1]."""
+        design = jnp.atleast_1d(design)
+        size = design.shape[0]
+        return jnp.column_stack([design, jnp.ones(size)])
+
+    def mean(self, design: Array, theta: Array) -> Array:
+        """Compute mean for a single design point."""
+        H = self.design_matrix(design)
+        return H @ theta
+
+    def sample(self, rng_key: Array, design: Array, theta: Array) -> Array:
+        """Sample from Student-t likelihood."""
+        size = design.shape[0]
+
+        loc = self.mean(design, theta)
+        scale_matrix = self.noise_stddev**2 * jnp.eye(size)
+
+        # Sample from chi-squared
+        rng_key, key1, key2 = jr.split(rng_key, 3)
+        chi2_samples = jr.gamma(key1, self.df/2, shape=(size,)) * 2
+
+        # Sample from multivariate normal
+        L = jnp.linalg.cholesky(scale_matrix)
+        z = jr.normal(key2, (size,))
+        normal_samples = loc + L @ z
+
+        # Scale to get Student-t
+        scale_factors = jnp.sqrt(self.df / chi2_samples)
+        t_samples = loc + (normal_samples - loc) * scale_factors
+
+        return t_samples
 
 
 def compute_mahalanobis_distance(
@@ -65,40 +109,41 @@ def generate_optimal_design(num_designs: int) -> Array:
 rng_key = jr.PRNGKey(42)
 
 # Models: Gaussian
-# jnp.logspace(-2, 0, 25)  # from 0.01 to 1.0
+# jnp.logspace(-2, 0, 25)
+alpha_robust = 1e-2
 alpha_nominal = 1.0
-alpha_true = 5e-1
-alpha_robust = 1e-1
 
 # Experiment parameters
 num_designs = 2
 num_trials = 10_000
 
-# Noise scale
+# Prior
 dim_theta = 2
 base_stddev = jnp.sqrt(1e-2)
 
-# Create true process
+# Create true process (Student-t)
+df_true = 5.
+
 proc_prior_mean = jnp.array([1.5, -1.5])
-proc_prior_cov = jnp.diag(jnp.array([1e-2, 1e-2]))
+proc_prior_cov = jnp.diag(jnp.array([1.0, 1.0]))
 proc_prior = Gaussian(mean=proc_prior_mean, cov=proc_prior_cov)
 
-proc_stddev = base_stddev / jnp.sqrt(alpha_true)
-proc_lklhd = LinearGaussian(noise_stddev=proc_stddev)
-process = LinearRegression(prior=proc_prior, likelihood=proc_lklhd)
+proc_stddev = base_stddev * 2 / 5e-1
+proc_lkld = LinearStudentT(df=df_true, noise_stddev=proc_stddev)
 
 # Create model (Gaussian)
-mdl_prior_mean = jnp.zeros(2)
-mdl_prior_cov = jnp.diag(jnp.array([2.0, 2.0]))
+mdl_prior_mean = jnp.array([1.5, -1.5])
+mdl_prior_cov = jnp.diag(jnp.array([1.0, 1.0]))
 mdl_prior = Gaussian(mean=mdl_prior_mean, cov=mdl_prior_cov)
 
 mdl_lklhd = LinearGaussian(noise_stddev=base_stddev)
 model = LinearRegression(prior=mdl_prior, likelihood=mdl_lklhd)
 
 print("=" * 80)
-print("COVERAGE COMPARISON: GAUSSIAN TRUE PROCESS")
+print("COVERAGE COMPARISON: STUDENT-T TRUE PROCESS")
 print("=" * 80)
-print(f"TRUE PROCESS: Gaussian with σ² = {proc_stddev**2}")
+print(f"TRUE PROCESS: Student-t with df={df_true}")
+print(f"  Noise: σ² = {proc_stddev**2}")
 print(f"\nMODELS: LinearGaussian")
 print(f"  Nominal α={alpha_nominal:.1f}:    Standard Bayesian Update")
 print(f"  Robust  α={alpha_robust:.2f}:    Tilted Posterior")
@@ -118,16 +163,16 @@ def run_single_trial(rng_key):
     key_theta, key_design_rand, key_obs_opt, key_obs_rand = jr.split(rng_key, 4)
 
     # Sample true parameter from prior
-    theta_true = process.prior.sample(key_theta, 1)[0]
+    theta_true = proc_prior.sample(key_theta, 1)[0]
 
     # ========== OPTIMIZED DESIGN ==========
-    y_optimal = process.likelihood.sample(key_obs_opt, xi_optimal, theta_true)
+    y_optimal = proc_lkld.sample(key_obs_opt, xi_optimal, theta_true)
     posterior_opt_nominal = model.get_tilted_posterior(y_optimal, xi_optimal, alpha_nominal)
     posterior_opt_robust = model.get_tilted_posterior(y_optimal, xi_optimal, alpha_robust)
 
     # ========== Uniform DESIGN ==========
     xi_uniform = generate_uniform_design(key_design_rand, num_designs)
-    y_uniform = process.likelihood.sample(key_obs_rand, xi_uniform, theta_true)
+    y_uniform = proc_lkld.sample(key_obs_rand, xi_uniform, theta_true)
     posterior_rand_nominal = model.get_tilted_posterior(y_uniform, xi_uniform, alpha_nominal)
     posterior_rand_robust = model.get_tilted_posterior(y_uniform, xi_uniform, alpha_robust)
 
@@ -170,7 +215,7 @@ cal_curve_rand_nominal = compute_calibration_curve(mahal_rand_nominal, coverage_
 cal_curve_rand_robust = compute_calibration_curve(mahal_rand_robust, coverage_levels, dim_theta)
 
 # Write plotted data to CSV
-csv_path = "examples/linear_regression/data/linreg_coverage.csv"
+csv_path = "examples/linear_regression/data/linreg_coverage_studentt.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     writer.writerow([
@@ -217,11 +262,11 @@ print(f"  Robust  α={alpha_robust:.2f}:     {100*coverage_95_rand_robust:.1f}%"
 # ============================================================================
 # COMPARISON TABLE
 # ============================================================================
-table_levels = jnp.linspace(0.1, 1.0, 10)
+table_levels = jnp.array([0.25, 0.50, 0.75, 0.95])
 print("\nCOVERAGE COMPARISON TABLE")
-print("-" * 115)
-print(f"{'Design':<18} | " + " | ".join([f"{l:8.1f}" for l in table_levels]))
-print("-" * 115)
+print("-" * 77)
+print(f"{'Design':<18} | " + " | ".join([f"{100 * l:7.0f}%" for l in table_levels]))
+print("-" * 77)
 
 # Robust evaluations
 rob_opt_covs = [compute_credible_coverage(mahal_opt_robust, l, dim_theta) for l in table_levels]
@@ -231,12 +276,12 @@ rob_rand_covs = [compute_credible_coverage(mahal_rand_robust, l, dim_theta) for 
 nom_opt_covs = [compute_credible_coverage(mahal_opt_nominal, l, dim_theta) for l in table_levels]
 nom_rand_covs = [compute_credible_coverage(mahal_rand_nominal, l, dim_theta) for l in table_levels]
 
-print(f"{'Robust + Optimal':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in rob_opt_covs]))
-print(f"{'Robust + Uniform':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in rob_rand_covs]))
-print("-" * 115)
-print(f"{'Nominal + Optimal':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in nom_opt_covs]))
-print(f"{'Nominal + Uniform':<18} | " + " | ".join([f"{100*c:8.1f}%" for c in nom_rand_covs]))
-print("-" * 115)
+print(f"{'Robust + Optimal':<18} | " + " | ".join([f"{100 * c:7.1f}%" for c in rob_opt_covs]))
+print(f"{'Robust + Uniform':<18} | " + " | ".join([f"{100 * c:7.1f}%" for c in rob_rand_covs]))
+print("-" * 77)
+print(f"{'Nominal + Optimal':<18} | " + " | ".join([f"{100 * c:7.1f}%" for c in nom_opt_covs]))
+print(f"{'Nominal + Uniform':<18} | " + " | ".join([f"{100 * c:7.1f}%" for c in nom_rand_covs]))
+print("-" * 77)
 
 print("\n" + "=" * 80)
 

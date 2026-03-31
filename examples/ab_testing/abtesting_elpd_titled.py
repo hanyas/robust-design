@@ -97,8 +97,8 @@ def custom_split(rng_key: Array, num_splits: int) -> Array:
 rng_key = jr.PRNGKey(42)
 
 # Experiment settings
-num_participants = 2500
-num_trials = 10_000
+num_participants = 1000
+num_trials = int(5 * 1024)
 num_test_points = 32
 
 # Alpha values to evaluate
@@ -109,8 +109,8 @@ num_alphas = len(alpha_values)
 # True Process (Tilted Binomial)
 alpha_true = 1e-1
 proc_prior = Beta(
-    delta=jnp.array([1, 5000.0]),
-    gamma=jnp.array([1, 5000.0])
+    delta=jnp.array([1., 500.0]),
+    gamma=jnp.array([1.0, 500.0])
 )
 proc_lklhd = TiltedBinomial(
     num_participants=num_participants,
@@ -119,8 +119,8 @@ proc_lklhd = TiltedBinomial(
 
 # Model (Beta-Binomial)
 mdl_prior = Beta(
-    delta=jnp.array([2., 50.0]),
-    gamma=jnp.array([2., 50.0])
+    delta=jnp.array([1.0, 5.0]),
+    gamma=jnp.array([1.0, 5.0])
 )
 
 mdl_lklhd = Binomial(num_participants=num_participants)

@@ -120,18 +120,18 @@ if __name__ == "__main__":
     rng_key = jr.PRNGKey(42)
 
     # Experiment settings
-    num_participants = 2500
+    num_participants = 1000
     num_trials = 10_000
 
     # Models: Beta-Binomial
     alpha_nominal = 1.0
     alpha_true = 1e-1
-    alpha_robust = 5e-2
+    alpha_robust = 1e-2
 
     # True Process (Tilted Binomial)
     proc_prior = Beta(
-        delta=jnp.array([1, 5000.0]),
-        gamma=jnp.array([1, 5000.0])
+        delta=jnp.array([1.0, 500.0]),
+        gamma=jnp.array([1.0, 500.0]),
     )
     proc_lklhd = TiltedBinomial(
         num_participants=num_participants,
@@ -140,8 +140,8 @@ if __name__ == "__main__":
 
     # Model (Beta-Binomial)
     mdl_prior = Beta(
-        delta=jnp.array([2., 50.0]),
-        gamma=jnp.array([2., 50.0])
+        delta=jnp.array([1.0, 5.0]),
+        gamma=jnp.array([1.0, 5.0]),
     )
 
     mdl_lklhd = Binomial(num_participants=num_participants)
@@ -273,11 +273,11 @@ if __name__ == "__main__":
     # ============================================================================
     # COMPARISON TABLE
     # ============================================================================
-    table_levels = jnp.linspace(0.1, 1.0, 10)
+    table_levels = jnp.array([0.25, 0.50, 0.75, 0.95])
     print("\nCOVERAGE COMPARISON TABLE")
-    print("-" * 115)
-    print(f"{'Design':<16} | " + " | ".join([f"{l:8.1f}" for l in table_levels]))
-    print("-" * 115)
+    print("-" * 73)
+    print(f"{'Design':<16} | " + " | ".join([f"{100 * l:7.0f}%" for l in table_levels]))
+    print("-" * 73)
 
     # Robust evaluations
     rob_opt_covs = [compute_coverage_at_level(cdf_opt_robust, l) for l in table_levels]
@@ -287,12 +287,12 @@ if __name__ == "__main__":
     nom_opt_covs = [compute_coverage_at_level(cdf_opt_nominal, l) for l in table_levels]
     nom_rand_covs = [compute_coverage_at_level(cdf_rand_nominal, l) for l in table_levels]
 
-    print(f"{'Robust + Optimal':<16} | " + " | ".join([f"{100*c:8.1f}%" for c in rob_opt_covs]))
-    print(f"{'Robust + Uniform':<16} | " + " | ".join([f"{100*c:8.1f}%" for c in rob_rand_covs]))
-    print("-" * 115)
-    print(f"{'Nominal + Optimal':<16} | " + " | ".join([f"{100*c:8.1f}%" for c in nom_opt_covs]))
-    print(f"{'Nominal + Uniform':<16} | " + " | ".join([f"{100*c:8.1f}%" for c in nom_rand_covs]))
-    print("-" * 115)
+    print(f"{'Robust + Optimal':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in rob_opt_covs]))
+    print(f"{'Robust + Uniform':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in rob_rand_covs]))
+    print("-" * 73)
+    print(f"{'Nominal + Optimal':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in nom_opt_covs]))
+    print(f"{'Nominal + Uniform':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in nom_rand_covs]))
+    print("-" * 73)
 
     # ============================================================================
     # VISUALIZATION

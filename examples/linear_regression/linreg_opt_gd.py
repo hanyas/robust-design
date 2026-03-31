@@ -12,7 +12,7 @@ from rdesign.distributions import Gaussian
 from rdesign.linear_regression import LinearGaussian
 from rdesign.linear_regression import LinearRegression
 
-from rdesign.utils import nested_mc_sibson_mi
+from rdesign.utils import nested_mc_sibson_mi_with_marginal as nested_mc_sibson_mi
 from rdesign.bijectors import Tanh
 
 import matplotlib.pyplot as plt

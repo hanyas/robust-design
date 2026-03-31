@@ -16,7 +16,7 @@ from rdesign.linear_regression import LinearGaussian
 from rdesign.linear_regression import LinearRegression
 
 from rdesign.base import REPSConfig
-from rdesign.utils import nested_mc_sibson_mi
+from rdesign.utils import nested_mc_sibson_mi_with_marginal as nested_mc_sibson_mi
 from rdesign.policy import BoxGaussian
 from rdesign.reps import optimize_policy
 from rdesign.bijectors import Tanh
@@ -48,7 +48,7 @@ NUM_OUTER = 16
 NUM_INNER = 16
 
 # Evaluation Settings
-NUM_TRIALS_GD = 128 # Number of independent GD runs
+NUM_TRIALS_GD = 128  # Number of independent GD runs
 NUM_SAMPLES_REPS = 128  # Number of samples from the policy
 
 # =============================================================================
@@ -116,7 +116,7 @@ def run_policy_search(seed: int = 0):
     config = REPSConfig(
         num_samples=256,
         batch_size=32,
-        max_iterations=1000,
+        max_iterations=2500,
         log_interval=100,
         verbose=True,
         lmbda=LAMBDA
@@ -207,7 +207,7 @@ reps_hist, _ = jnp.histogram(reps_regrets, bins=regret_bins)
 regret_bin_centers = (regret_bins[:-1] + regret_bins[1:]) / 2
 
 save_histogram_csv(
-    "examples/linear_regression/data/linreg_regret.csv",
+    "./data/linreg_regret.csv",
     regret_bin_centers, gd_hist, reps_hist,
     ["bin_center", "gd_density", "reps_density"]
 )
@@ -219,7 +219,7 @@ reps_sat_hist, _ = jnp.histogram(reps_saturation, bins=sat_bins)
 sat_bin_centers = (sat_bins[:-1] + sat_bins[1:]) / 2
 
 save_histogram_csv(
-    "examples/linear_regression/data/linreg_saturation.csv",
+    "./data/linreg_saturation.csv",
     sat_bin_centers, gd_sat_hist, reps_sat_hist,
     ["bin_center", "gd_density", "reps_density"]
 )
