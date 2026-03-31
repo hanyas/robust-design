@@ -16,7 +16,7 @@ from rdesign.ab_testing import ABTesting, Binomial
 
 from rdesign.base import REPSConfig, Policy
 from rdesign.policy import Categorical
-from rdesign.utils import nested_mc_sibson_mi
+from rdesign.utils import nested_mc_sibson_mi_with_marginal as nested_mc_sibson_mi
 from rdesign.reps import optimize_policy
 
 import matplotlib.pyplot as plt
@@ -50,7 +50,7 @@ NUM_SAMPLES_REPS = 128  # Number of samples from the policy
 
 
 # =============================================================================
-# 3. Deterministic Optimizer 
+# 3. Deterministic Optimizer
 # =============================================================================
 
 def run_enumeration(num_trials: int, seed: int = 42):
@@ -62,10 +62,10 @@ def run_enumeration(num_trials: int, seed: int = 42):
 
     designs = jnp.arange(NUM_PARTICIPANTS + 1, dtype=jnp.float64)
 
-    def find_best_single(rng_key):        
+    def find_best_single(rng_key):
         # Vectorize objective evaluation over all designs
         keys = jr.split(rng_key, NUM_PARTICIPANTS + 1)
-        
+
         vals = jax.vmap(lambda k, d: nested_mc_sibson_mi(
             rng_key=k,
             model=model,
@@ -74,7 +74,7 @@ def run_enumeration(num_trials: int, seed: int = 42):
             num_inner=NUM_INNER,
             alpha=ALPHA
         ))(keys, designs)
-        
+
         return designs[jnp.argmax(vals)]
 
     trial_keys = jr.split(jr.PRNGKey(seed), num_trials)
@@ -93,7 +93,7 @@ def run_policy_search(seed: int = 0):
     config = REPSConfig(
         num_samples=256,
         batch_size=32,
-        max_iterations=1000,
+        max_iterations=2500,
         log_interval=200,
         verbose=True,
         lmbda=LAMBDA
