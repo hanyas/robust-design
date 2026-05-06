@@ -1,13 +1,14 @@
 """
 Posterior Calibration Assessment for Misspecified Linear Regression
 """
+
 from typing import NamedTuple
 
 import jax
 from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
-from scipy.stats import chi2   # chi2.ppf is not supported in JAX
+from scipy.stats import chi2  # chi2.ppf is not supported in JAX
 import csv
 
 from rdesign.distributions import Gaussian
@@ -58,7 +59,7 @@ def generate_uniform_design(rng_key: Array, num_designs: int) -> Array:
 
 def generate_optimal_design(num_designs: int) -> Array:
     """Generate optimal design: alternating -1 and 1."""
-    return jnp.array([(-1.0)**(i+1) for i in range(num_designs)])
+    return jnp.array([(-1.0) ** (i + 1) for i in range(num_designs)])
 
 
 # Configuration
@@ -106,13 +107,12 @@ print(f"\nDesign points:     {num_designs}")
 print(f"Number of trials:    {num_trials}")
 print("=" * 80)
 
-# ============================================================================
-# RUN EXPERIMENTS
-# ============================================================================
+
 print(f"\nRunning {num_trials} trials...")
 
 # Generate optimized design once
 xi_optimal = generate_optimal_design(num_designs)
+
 
 def run_single_trial(rng_key):
     key_theta, key_design_rand, key_obs_opt, key_obs_rand = jr.split(rng_key, 4)
@@ -132,12 +132,15 @@ def run_single_trial(rng_key):
     posterior_rand_robust = model.get_tilted_posterior(y_uniform, xi_uniform, alpha_robust)
 
     # Compute Mahalanobis distances
-    return jnp.array([
-        compute_mahalanobis_distance(theta_true, posterior_opt_nominal.mean, posterior_opt_nominal.cov),
-        compute_mahalanobis_distance(theta_true, posterior_opt_robust.mean, posterior_opt_robust.cov),
-        compute_mahalanobis_distance(theta_true, posterior_rand_nominal.mean, posterior_rand_nominal.cov),
-        compute_mahalanobis_distance(theta_true, posterior_rand_robust.mean, posterior_rand_robust.cov)
-    ])
+    return jnp.array(
+        [
+            compute_mahalanobis_distance(theta_true, posterior_opt_nominal.mean, posterior_opt_nominal.cov),
+            compute_mahalanobis_distance(theta_true, posterior_opt_robust.mean, posterior_opt_robust.cov),
+            compute_mahalanobis_distance(theta_true, posterior_rand_nominal.mean, posterior_rand_nominal.cov),
+            compute_mahalanobis_distance(theta_true, posterior_rand_robust.mean, posterior_rand_robust.cov),
+        ]
+    )
+
 
 # Batch run all trials
 trial_keys = jr.split(rng_key, num_trials)
@@ -151,9 +154,6 @@ mahal_rand_robust = results[:, 3]
 
 print(f"Completed {num_trials} trials")
 
-# ============================================================================
-# COMPUTE CALIBRATION METRICS
-# ============================================================================
 print("\n" + "=" * 80)
 print("COMPUTING CALIBRATION METRICS")
 print("=" * 80)
@@ -173,13 +173,15 @@ cal_curve_rand_robust = compute_calibration_curve(mahal_rand_robust, coverage_le
 csv_path = "examples/linear_regression/data/linreg_coverage.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
-    writer.writerow([
-        "coverage_levels",
-        "cal_curve_opt_nominal",
-        "cal_curve_opt_robust",
-        "cal_curve_rand_nominal",
-        "cal_curve_rand_robust",
-    ])
+    writer.writerow(
+        [
+            "coverage_levels",
+            "cal_curve_opt_nominal",
+            "cal_curve_opt_robust",
+            "cal_curve_rand_nominal",
+            "cal_curve_rand_robust",
+        ]
+    )
     for row in zip(
         coverage_levels.tolist(),
         cal_curve_opt_nominal.tolist(),
@@ -197,9 +199,6 @@ coverage_95_rand_robust = compute_credible_coverage(mahal_rand_robust, 0.95, dim
 
 print("Computed calibration curves")
 
-# ============================================================================
-# RESULTS
-# ============================================================================
 print("\n" + "=" * 80)
 print("RESULTS: 95% Credible Region Coverage")
 print("=" * 80)
@@ -214,9 +213,6 @@ print("-" * 30)
 print(f"  Nominal α={alpha_nominal:.1f}:     {100*coverage_95_rand_nominal:.1f}%")
 print(f"  Robust  α={alpha_robust:.2f}:     {100*coverage_95_rand_robust:.1f}%")
 
-# ============================================================================
-# COMPARISON TABLE
-# ============================================================================
 table_levels = jnp.array([0.25, 0.50, 0.75, 0.95])
 print("\nCOVERAGE COMPARISON TABLE")
 print("-" * 77)
@@ -240,9 +236,6 @@ print("-" * 77)
 
 print("\n" + "=" * 80)
 
-# ============================================================================
-# VISUALIZATION: CALIBRATION CURVES
-# ============================================================================
 print("\n" + "=" * 80)
 print("VISUALIZATION")
 print("=" * 80)
@@ -250,27 +243,51 @@ print("=" * 80)
 fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 
 # Perfect calibration reference
-ax.plot([0, 1], [0, 1], ':', color='0.2', lw=2, label='Perfect')
+ax.plot([0, 1], [0, 1], ":", color="0.2", lw=2, label="Perfect")
 
 # Optimal design - Nominal (dark grey, dashed)
-ax.plot(coverage_levels, cal_curve_opt_nominal, '--', color='0.1', lw=2.5,
-        label=f'Nominal w/ Optimal (α={alpha_nominal:.1f})')
+ax.plot(
+    coverage_levels,
+    cal_curve_opt_nominal,
+    "--",
+    color="0.1",
+    lw=2.5,
+    label=f"Nominal w/ Optimal (α={alpha_nominal:.1f})",
+)
 
 # Optimal design - Robust (dark grey, solid)
-ax.plot(coverage_levels, cal_curve_opt_robust, '-', color='0.1', lw=2.5,
-        label=f'Robust w/ Optimal (α={alpha_robust:.2f})')
+ax.plot(
+    coverage_levels,
+    cal_curve_opt_robust,
+    "-",
+    color="0.1",
+    lw=2.5,
+    label=f"Robust w/ Optimal (α={alpha_robust:.2f})",
+)
 
 # Uniform design - Nominal (medium grey, dashed)
-ax.plot(coverage_levels, cal_curve_rand_nominal, '--', color='0.5', lw=2.5,
-        label=f'Nominal w/ Uniform (α={alpha_nominal:.1f})')
+ax.plot(
+    coverage_levels,
+    cal_curve_rand_nominal,
+    "--",
+    color="0.5",
+    lw=2.5,
+    label=f"Nominal w/ Uniform (α={alpha_nominal:.1f})",
+)
 
 # Uniform design - Robust (medium grey, solid)
-ax.plot(coverage_levels, cal_curve_rand_robust, '-', color='0.5', lw=2.5,
-        label=f'Robust w/ Uniform (α={alpha_robust:.2f})')
+ax.plot(
+    coverage_levels,
+    cal_curve_rand_robust,
+    "-",
+    color="0.5",
+    lw=2.5,
+    label=f"Robust w/ Uniform (α={alpha_robust:.2f})",
+)
 
-ax.set_xlabel('Expected Coverage', fontsize=12)
-ax.set_ylabel('Actual Coverage', fontsize=12)
-ax.legend(fontsize=10, loc='lower right')
+ax.set_xlabel("Expected Coverage", fontsize=12)
+ax.set_ylabel("Actual Coverage", fontsize=12)
+ax.legend(fontsize=10, loc="lower right")
 ax.set_xlim([0, 1])
 ax.set_ylim([0, 1])
 

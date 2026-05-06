@@ -1,5 +1,5 @@
 """
-Sweep over sample sizes (budgets) comparing GD and REPS for linear regression design.
+Sweep over sample sizes comparing GD and REPS for linear regression design.
 """
 
 import csv

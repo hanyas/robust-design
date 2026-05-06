@@ -85,9 +85,6 @@ def generate_random_design(rng_key: Array, num_participants: int) -> int:
 
 
 if __name__ == "__main__":
-    # ============================================================================
-    # CONFIGURATION
-    # ============================================================================
     rng_key = jr.PRNGKey(42)
 
     # Experiment settings
@@ -129,9 +126,6 @@ if __name__ == "__main__":
     print(f"  Number of trials: {num_trials}")
     print("=" * 80)
 
-    # ============================================================================
-    # RUN EXPERIMENTS
-    # ============================================================================
     print(f"\nRunning {num_trials} trials...")
 
     def run_single_trial(rng_key):
@@ -160,9 +154,6 @@ if __name__ == "__main__":
     # Flatten across trials and arms for each α
     cdf_per_alpha = [results[:, i, :].flatten() for i in range(num_alphas)]
 
-    # ============================================================================
-    # COMPUTE METRICS
-    # ============================================================================
     print("\n" + "=" * 80)
     print("COMPUTING CALIBRATION METRICS")
     print("=" * 80)
@@ -179,9 +170,6 @@ if __name__ == "__main__":
             row = [level] + [curves[i][level_idx].item() for i in range(num_alphas)]
             writer.writerow(row)
 
-    # ============================================================================
-    # RESULTS
-    # ============================================================================
     print("\n" + "=" * 80)
     print("COVERAGE COMPARISON TABLE")
     print("=" * 80)
@@ -192,9 +180,6 @@ if __name__ == "__main__":
         covs = [compute_coverage_at_level(cdf_per_alpha[i], l) for l in table_levels]
         print(f"{float(alpha):>8.4f} | " + " | ".join([f"{100 * c:7.1f}%" for c in covs]))
 
-    # ============================================================================
-    # VISUALIZATION
-    # ============================================================================
     print("\nVISUALIZATION")
     fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 

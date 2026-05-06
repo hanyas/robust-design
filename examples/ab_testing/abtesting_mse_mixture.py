@@ -72,9 +72,6 @@ def summarize(values: Array) -> tuple[Array, Array, Array]:
 
 
 if __name__ == "__main__":
-    # ============================================================================
-    # CONFIGURATION
-    # ============================================================================
     rng_key = jr.PRNGKey(42)
 
     num_participants = 100
@@ -120,9 +117,6 @@ if __name__ == "__main__":
     print(f"Number of trials:   {num_trials}")
     print("=" * 100)
 
-    # ============================================================================
-    # OPTIMAL DESIGNS PER ALPHA
-    # ============================================================================
     print("\n" + "=" * 100)
     print("FINDING SIBSON DESIGNS")
     print("=" * 100)
@@ -134,9 +128,6 @@ if __name__ == "__main__":
     for idx in range(num_alphas):
         print(f"  α = {float(alpha_values[idx]):.4f}: Sibson n_A = {int(sibson_designs[idx])}")
 
-    # ============================================================================
-    # RUN EXPERIMENTS
-    # ============================================================================
     print("\n" + "=" * 100)
     print("RUNNING RMSE COMPARISON")
     print("=" * 100)
@@ -199,9 +190,6 @@ if __name__ == "__main__":
 
     print("✓ Complete")
 
-    # ============================================================================
-    # ANALYSIS
-    # ============================================================================
     print("\n" + "=" * 100)
     print("RESULTS: Posterior Mean RMSE ACROSS α")
     print("=" * 100)
@@ -218,9 +206,6 @@ if __name__ == "__main__":
             f"{float(mean_unif[idx]):>8.4f} [{float(q10_unif[idx]):.4f}, {float(q90_unif[idx]):.4f}]"
         )
 
-    # ============================================================================
-    # CSV
-    # ============================================================================
     csv_path = "examples/ab_testing/data/abtesting_mse_mixture.csv"
     with open(csv_path, "w", newline="") as csv_file:
         writer = csv.writer(csv_file)

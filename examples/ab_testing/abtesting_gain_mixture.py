@@ -1,5 +1,5 @@
 """
-Robust Experimental Design: Under-Promise, Over-Deliver Assessment (A/B Testing)
+Realized information under Beta-mixture Binomial true process
 """
 
 from typing import NamedTuple

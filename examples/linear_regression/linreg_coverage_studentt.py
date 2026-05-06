@@ -86,15 +86,12 @@ def generate_uniform_design(rng_key: Array, num_designs: int) -> Array:
     return jr.uniform(rng_key, shape=(num_designs,), minval=-1.0, maxval=1.0)
 
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
 rng_key = jr.PRNGKey(42)
 
 num_designs = 2
 num_trials = 10_000
 
-# α grid: quarter-decade from 10^{-5/4} to 10^0 (approx 0.056 -> 1)
+# α grid
 alpha_values = 10.0 ** jnp.linspace(-1.25, 0.0, 5)
 num_alphas = alpha_values.shape[0]
 
@@ -131,9 +128,7 @@ print(f"\nDesign points:    {num_designs}")
 print(f"Number of trials: {num_trials}")
 print("=" * 80)
 
-# ============================================================================
-# RUN EXPERIMENTS
-# ============================================================================
+
 print(f"\nRunning {num_trials} trials...")
 
 
@@ -161,9 +156,6 @@ mahal_per_alpha = [results[:, i] for i in range(num_alphas)]
 
 print(f"Completed {num_trials} trials")
 
-# ============================================================================
-# COMPUTE CALIBRATION METRICS
-# ============================================================================
 print("\n" + "=" * 80)
 print("COMPUTING CALIBRATION METRICS")
 print("=" * 80)
@@ -182,9 +174,6 @@ with open(csv_path, "w", newline="") as csvfile:
 
 print("Computed calibration curves")
 
-# ============================================================================
-# RESULTS
-# ============================================================================
 print("\n" + "=" * 80)
 print("COVERAGE COMPARISON TABLE")
 print("=" * 80)
@@ -197,9 +186,6 @@ for i, alpha in enumerate(alpha_values):
 
 print("\n" + "=" * 80)
 
-# ============================================================================
-# VISUALIZATION
-# ============================================================================
 print("\nVISUALIZATION")
 fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 

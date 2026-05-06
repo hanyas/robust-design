@@ -82,10 +82,6 @@ def build_alpha_grid() -> Array:
     return jnp.asarray(np.geomspace(1e-2, 1.0, 21), dtype=jnp.float64)
 
 
-# ============================================================================
-# Configuration
-# ============================================================================
-
 rng_key = jr.PRNGKey(42)
 
 # Alpha values to evaluate
@@ -133,10 +129,6 @@ print(f"\nDesign points:     {num_design_points}")
 print(f"Test points:       {num_test_points}")
 print(f"Number of trials:  {num_trials}")
 print("=" * 80)
-
-# ============================================================================
-# Run Experiments
-# ============================================================================
 
 print("\n" + "=" * 80)
 print("RUNNING EXPERIMENTS")
@@ -189,10 +181,6 @@ for trial in range(num_trials):
 
 print("✓ Complete")
 
-# ============================================================================
-# Analysis
-# ============================================================================
-
 print("\n" + "=" * 80)
 print("RESULTS: ELPD across α")
 print("=" * 80)
@@ -215,10 +203,6 @@ for alpha_target in [0.01, 0.05, 0.1, 0.5, 1.0]:
     )
 
 print("\n" + "=" * 80)
-
-# ============================================================================
-# Visualization
-# ============================================================================
 
 fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 

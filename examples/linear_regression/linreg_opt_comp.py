@@ -163,8 +163,6 @@ def save_histogram_csv(filename, bin_centers, count1, count2, header):
     print(f"Data saved to {filename}")
 
 
-# TV similarity: 1 - mean L1 distance between |ξ| and the saturated
-# optimum [1, ..., 1]. Since |ξ_i| ≤ 1, this reduces to mean(|ξ_i|).
 def tv_similarity(designs: Array) -> Array:
     return jnp.mean(jnp.abs(designs), axis=1)
 
@@ -204,10 +202,6 @@ print(f"Deterministic (GD) | Mean Similarity: {jnp.mean(gd_similarity):.4f}")
 print(f"Stochastic (REPS)  | Mean Similarity: {jnp.mean(reps_similarity):.4f}")
 
 # D. Save Histograms to CSV
-
-# Both histograms span an interval of width 0.6 (regret: [0, 0.6],
-# similarity: [0.4, 1.0]) with the same edge count, so the bin width
-# (i.e., the bar width) is identical across the two plots.
 NUM_BIN_EDGES = 30
 
 # 1. Regret Histogram

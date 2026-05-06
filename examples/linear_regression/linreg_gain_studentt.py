@@ -54,10 +54,6 @@ def generate_random_design(rng_key: Array, num_designs: int) -> Array:
     return jr.uniform(rng_key, shape=(num_designs,), minval=-1.0, maxval=1.0)
 
 
-# ============================================================================
-# Configuration
-# ============================================================================
-
 rng_key = jr.PRNGKey(42)
 
 alpha_nominal = 1.0
@@ -86,10 +82,6 @@ mdl_prior_cov = jnp.diag(jnp.array([1.0, 1.0]))
 mdl_prior = Gaussian(mean=mdl_prior_mean, cov=mdl_prior_cov)
 mdl_lklhd = LinearGaussian(noise_stddev=base_stddev)
 model = LinearRegression(prior=mdl_prior, likelihood=mdl_lklhd)
-
-# ============================================================================
-# Run Simulation
-# ============================================================================
 
 print(f"\nRunning {num_trials} trials...")
 
@@ -126,10 +118,6 @@ avg_robust = jnp.mean(dist_robust)
 
 print("✓ Complete")
 
-# ============================================================================
-# Results
-# ============================================================================
-
 print("\n" + "=" * 80)
 print("RESULTS")
 print("=" * 80)
@@ -137,15 +125,9 @@ print(f"Nominal  (perceived utility): {avg_nominal:.4f} nats")
 print(f"Robust   (perceived utility): {avg_robust:.4f} nats")
 print("-" * 80)
 
-# ============================================================================
-# Visualization
-# ============================================================================
-
 fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
-# Histogram bins — shared range across both distributions, clipped at the
-# 99th percentile so a handful of Student-t tail outliers don't blow out
-# the bin range.
+# Histogram bins — shared range across both distributions
 all_data = jnp.concatenate([dist_nominal, dist_robust])
 lo = float(all_data.min())
 hi = float(jnp.percentile(all_data, 99))

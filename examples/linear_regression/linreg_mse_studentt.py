@@ -77,10 +77,6 @@ def summarize(values: Array) -> tuple[Array, Array, Array]:
     return mean, q10, q90
 
 
-# ============================================================================
-# Configuration
-# ============================================================================
-
 rng_key = jr.PRNGKey(42)
 
 alpha_values = 10.0 ** jnp.linspace(-1.25, 0.0, 5)
@@ -124,10 +120,6 @@ print("  Sibson-optimized two-point boundary design vs uniform random design")
 print(f"\nDesign points:     {num_design_points}")
 print(f"Number of trials:  {num_trials}")
 print("=" * 80)
-
-# ============================================================================
-# Run Experiments
-# ============================================================================
 
 print("\n" + "=" * 80)
 print("RUNNING EXPERIMENTS")
@@ -181,10 +173,6 @@ for trial in range(num_trials):
     rmse_uniform = rmse_uniform.at[:, trial].set(r_unif)
 
 print("✓ Complete")
-
-# ============================================================================
-# Analysis
-# ============================================================================
 
 print("\n" + "=" * 80)
 print("RESULTS: Posterior Mean RMSE across α")

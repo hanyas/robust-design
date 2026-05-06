@@ -25,10 +25,6 @@ import matplotlib.pyplot as plt
 jax.config.update("jax_enable_x64", True)
 
 
-# =============================================================================
-# 1. Problem Setup
-# =============================================================================
-
 NUM_PARTICIPANTS = 100
 ALPHA = 1e-1
 LAMBDA = 1e6
@@ -43,13 +39,8 @@ NUM_OUTER = 16
 NUM_INNER = 16
 
 # Evaluation Settings
-NUM_TRIALS_ENUM = 1024  # Number of independent enumeration runs
-NUM_SAMPLES_REPS = 1024  # Number of samples from the policy
-
-
-# =============================================================================
-# 3. Deterministic Optimizer
-# =============================================================================
+NUM_ENUM_TRIALS = 1024  # Number of independent enumeration runs
+NUM_REPS_SAMPLES = 1024  # Number of samples from the policy
 
 
 def run_enumeration(num_trials: int, seed: int = 42):
@@ -77,11 +68,6 @@ def run_enumeration(num_trials: int, seed: int = 42):
     return jax.jit(jax.vmap(find_best_single))(trial_keys)
 
 
-# =============================================================================
-# 4. Stochastic Policy Optimizer (REPS)
-# =============================================================================
-
-
 def run_policy_search(seed: int = 0):
     print(f"\n[REPS] Training discrete policy...")
 
@@ -103,16 +89,10 @@ def run_policy_search(seed: int = 0):
     optimizer = optax.adam(learning_rate=1e-1)
     state = policy.init_state(init_key, optimizer)
 
-    result = optimize_policy(
-        rng_key=run_key, func=objective_fn, policy=policy, state=state, config=config
-    )
+    result = optimize_policy(rng_key=run_key, func=objective_fn, policy=policy, state=state, config=config)
 
     return policy, result.state
 
-
-# =============================================================================
-# 5. Main Comparison Logic
-# =============================================================================
 
 print("\n" + "=" * 80)
 print("AB TESTING OPTIMIZATION COMPARISON")
@@ -146,7 +126,7 @@ def save_histogram_csv(filename, bin_centers, count1, count2, header):
 
 
 # A. Run Enumeration
-enum_designs = run_enumeration(NUM_TRIALS_ENUM)
+enum_designs = run_enumeration(NUM_ENUM_TRIALS)
 enum_regrets = compute_regret(enum_designs)
 
 # B. Run REPS
@@ -154,14 +134,11 @@ policy, state = run_policy_search()
 
 # Sample from the trained policy
 sample_key = jr.PRNGKey(42)
-sample_keys = jr.split(sample_key, NUM_SAMPLES_REPS)
+sample_keys = jr.split(sample_key, NUM_REPS_SAMPLES)
 reps_designs = jax.vmap(lambda k: policy.sample(k, state.params))(sample_keys)
 reps_regrets = compute_regret(reps_designs)
 
 
-# TV similarity between the trial allocation [n_A, n_B] / N and the
-# optimal allocation [n_A*, n_B*] / N. For a 2-arm split this simplifies to
-# 1 - |n_A - n_A*| / N.
 def tv_similarity(designs: Array) -> Array:
     return 1.0 - jnp.abs(designs - true_opt_design) / NUM_PARTICIPANTS
 

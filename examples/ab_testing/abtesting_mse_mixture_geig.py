@@ -67,9 +67,6 @@ def summarize(values: Array) -> tuple[Array, Array, Array]:
 
 
 if __name__ == "__main__":
-    # ============================================================================
-    # CONFIGURATION
-    # ============================================================================
     rng_key = jr.PRNGKey(42)
 
     num_participants = 100
@@ -115,9 +112,6 @@ if __name__ == "__main__":
     print(f"Number of trials:   {num_trials}")
     print("=" * 100)
 
-    # ============================================================================
-    # OPTIMAL DESIGNS PER ALPHA
-    # ============================================================================
     print("\n" + "=" * 100)
     print("FINDING SIBSON AND GEIG DESIGNS")
     print("=" * 100)
@@ -137,9 +131,6 @@ if __name__ == "__main__":
             f"GEIG n_A = {int(geig_designs[idx])}"
         )
 
-    # ============================================================================
-    # RUN EXPERIMENTS
-    # ============================================================================
     print("\n" + "=" * 100)
     print("RUNNING RMSE COMPARISON")
     print("=" * 100)
@@ -200,9 +191,6 @@ if __name__ == "__main__":
 
     print("✓ Complete")
 
-    # ============================================================================
-    # ANALYSIS
-    # ============================================================================
     print("\n" + "=" * 100)
     print("RESULTS: Posterior Mean RMSE ACROSS α")
     print("=" * 100)
@@ -219,9 +207,6 @@ if __name__ == "__main__":
             f"{float(mean_geig[idx]):>8.4f} [{float(q10_geig[idx]):.4f}, {float(q90_geig[idx]):.4f}]"
         )
 
-    # ============================================================================
-    # CSV
-    # ============================================================================
     csv_path = "examples/ab_testing/data/abtesting_mse_mixture_geig.csv"
     with open(csv_path, "w", newline="") as csv_file:
         writer = csv.writer(csv_file)

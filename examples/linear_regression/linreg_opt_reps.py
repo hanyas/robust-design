@@ -93,8 +93,6 @@ result = optimize_policy(
     config=config,
 )
 
-# --- Analysis ---
-
 # Extract final approximate mode design
 final_mu = result.state.params["mean"]
 final_design = jnp.tanh(final_mu)

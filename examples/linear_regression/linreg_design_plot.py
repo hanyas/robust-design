@@ -104,7 +104,14 @@ for i, alpha in enumerate(alphas):
     mi_grid = mi_vals.reshape(n_grid, n_grid)
 
     # Smooth heatmap background
-    ax.imshow(mi_grid, origin="lower", extent=[-1, 1, -1, 1], cmap="gray", interpolation="bicubic", alpha=0.3)
+    ax.imshow(
+        mi_grid,
+        origin="lower",
+        extent=[-1, 1, -1, 1],
+        cmap="gray",
+        interpolation="bicubic",
+        alpha=0.3,
+    )
 
     # Contour lines (dashed)
     cl = ax.contour(
