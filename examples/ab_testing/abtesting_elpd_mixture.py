@@ -1,15 +1,7 @@
 """
 Posterior predictive performance under a Beta-mixture Binomial true process.
-
-This benchmark keeps the same Beta-mixture Binomial data-generating process as
-the mixture calibration example, but compares:
-
-1. The Sibson-selected design d_S(alpha)
-2. A uniform random design
-
-Inference uses the same q_alpha(theta | x, d) in both cases, and performance is
-measured by held-out ELPD under the model's posterior predictive distribution.
 """
+
 from typing import NamedTuple
 
 import csv
@@ -37,6 +29,7 @@ class BetaMixtureBinomial(NamedTuple):
     and then draw x ~ Binomial(n, p). The mean remains theta, while smaller
     kappa values induce stronger overdispersion and more extreme counts.
     """
+
     num_participants: int
     mixture_concentration: float = 10.0
 
@@ -96,8 +89,8 @@ if __name__ == "__main__":
     rng_key = jr.PRNGKey(42)
 
     # Experiment settings
-    num_participants = 1000
-    num_trials = int(5 * 1024)
+    num_participants = 100
+    num_trials = int(2 * 1024)
     num_test_points = 32
 
     alpha_values = build_alpha_grid()
@@ -147,12 +140,10 @@ if __name__ == "__main__":
     print("=" * 100)
 
     designs = jnp.arange(num_participants + 1)
-    sibson_matrix = jax.vmap(
-        lambda alpha: jax.vmap(lambda d: model.sibson_mi(d, alpha))(designs)
-    )(alpha_values)
+    sibson_matrix = jax.vmap(lambda alpha: jax.vmap(lambda d: model.sibson_mi(d, alpha))(designs))(alpha_values)
     sibson_designs = jnp.argmax(sibson_matrix, axis=1)
 
-    for alpha_target in [0.01, 0.05, 0.10, 0.20, 0.50, 1.0]:
+    for alpha_target in [0.01, 0.05, 0.10, 0.50, 1.0]:
         idx = jnp.argmin(jnp.abs(alpha_values - alpha_target))
         print(f"  α = {float(alpha_values[idx]):.4f}: Sibson n_A = {int(sibson_designs[idx])}")
 
@@ -178,16 +169,12 @@ if __name__ == "__main__":
         def evaluate_alpha(alpha, design_sibson, x_sibson_val):
             posterior_sibson = model.get_tilted_posterior(x_sibson_val, design_sibson, alpha)
             log_preds_sibson = jax.vmap(
-                lambda d, x: model.get_posterior_predictive(
-                    posterior_sibson, d, alpha=alpha
-                ).logpmf(x)
+                lambda d, x: model.get_posterior_predictive(posterior_sibson, d, alpha=alpha).logpmf(x)
             )(ds_test, xs_test)
 
             posterior_unif = model.get_tilted_posterior(x_unif, design_unif, alpha)
             log_preds_unif = jax.vmap(
-                lambda d, x: model.get_posterior_predictive(
-                    posterior_unif, d, alpha=alpha
-                ).logpmf(x)
+                lambda d, x: model.get_posterior_predictive(posterior_unif, d, alpha=alpha).logpmf(x)
             )(ds_test, xs_test)
 
             return jnp.mean(log_preds_sibson), jnp.mean(log_preds_unif)
@@ -207,9 +194,7 @@ if __name__ == "__main__":
         theta_true = proc_prior.sample(sub_key, 1)[0]
 
         rng_key, sibson_keys = custom_split(rng_key, num_alphas + 1)
-        x_sibson = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(
-            sibson_keys, sibson_designs
-        )
+        x_sibson = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(sibson_keys, sibson_designs)
 
         rng_key, sub_key = jr.split(rng_key)
         design_uniform = generate_uniform_design(sub_key, num_participants)
@@ -217,14 +202,10 @@ if __name__ == "__main__":
         x_uniform = proc_lklhd.sample(sub_key, design_uniform, theta_true)
 
         rng_key, test_design_keys = custom_split(rng_key, num_test_points + 1)
-        designs_test = jax.vmap(
-            lambda k: generate_uniform_design(k, num_participants)
-        )(test_design_keys)
+        designs_test = jax.vmap(lambda k: generate_uniform_design(k, num_participants))(test_design_keys)
 
         rng_key, test_obs_keys = custom_split(rng_key, num_test_points + 1)
-        x_test = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(
-            test_obs_keys, designs_test
-        )
+        x_test = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(test_obs_keys, designs_test)
 
         elpds_sibson, elpds_unif = evaluate_all_alphas(
             alpha_values,
@@ -248,17 +229,10 @@ if __name__ == "__main__":
     print("RESULTS: ELPD ACROSS α")
     print("=" * 100)
 
-    mean_elpd_sibson, se_elpd_sibson, q05_sibson, q95_sibson = summarize_elpd(
-        elpd_sibson, num_trials
-    )
-    mean_elpd_unif, se_elpd_unif, q05_unif, q95_unif = summarize_elpd(
-        elpd_uniform, num_trials
-    )
+    mean_elpd_sibson, se_elpd_sibson, q05_sibson, q95_sibson = summarize_elpd(elpd_sibson, num_trials)
+    mean_elpd_unif, se_elpd_unif, q05_unif, q95_unif = summarize_elpd(elpd_uniform, num_trials)
 
-    print(
-        f"\n{'α':>8} | {'Sibson n_A':>10} | "
-        f"{'Sibson ELPD':>20} | {'Uniform ELPD':>20}"
-    )
+    print(f"\n{'α':>8} | {'Sibson n_A':>10} | " f"{'Sibson ELPD':>20} | {'Uniform ELPD':>20}")
     print("-" * 74)
     for alpha_target in [0.01, 0.05, 0.10, 0.20, 0.50, 1.0]:
         idx = jnp.argmin(jnp.abs(alpha_values - alpha_target))
@@ -275,31 +249,35 @@ if __name__ == "__main__":
     csv_path = "examples/ab_testing/data/abtesting_elpd_mixture.csv"
     with open(csv_path, "w", newline="") as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerow([
-            "alpha",
-            "sibson_design",
-            "mean_elpd_sibson",
-            "se_elpd_sibson",
-            "q05_elpd_sibson",
-            "q95_elpd_sibson",
-            "mean_elpd_uniform",
-            "se_elpd_uniform",
-            "q05_elpd_uniform",
-            "q95_elpd_uniform",
-        ])
+        writer.writerow(
+            [
+                "alpha",
+                "sibson_design",
+                "mean_elpd_sibson",
+                "se_elpd_sibson",
+                "q05_elpd_sibson",
+                "q95_elpd_sibson",
+                "mean_elpd_uniform",
+                "se_elpd_uniform",
+                "q05_elpd_uniform",
+                "q95_elpd_uniform",
+            ]
+        )
         for idx in range(num_alphas):
-            writer.writerow([
-                float(alpha_values[idx]),
-                int(sibson_designs[idx]),
-                float(mean_elpd_sibson[idx]),
-                float(se_elpd_sibson[idx]),
-                float(q05_sibson[idx]),
-                float(q95_sibson[idx]),
-                float(mean_elpd_unif[idx]),
-                float(se_elpd_unif[idx]),
-                float(q05_unif[idx]),
-                float(q95_unif[idx]),
-            ])
+            writer.writerow(
+                [
+                    float(alpha_values[idx]),
+                    int(sibson_designs[idx]),
+                    float(mean_elpd_sibson[idx]),
+                    float(se_elpd_sibson[idx]),
+                    float(q05_sibson[idx]),
+                    float(q95_sibson[idx]),
+                    float(mean_elpd_unif[idx]),
+                    float(se_elpd_unif[idx]),
+                    float(q05_unif[idx]),
+                    float(q95_unif[idx]),
+                ]
+            )
 
     fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 

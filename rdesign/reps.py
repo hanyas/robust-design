@@ -27,7 +27,7 @@ def compute_weights(values: Array, tau: float) -> Array:
 @partial(jax.jit, static_argnames="policy")
 def update_policy(
     policy: Policy,
-    policy_state: TrainState,
+    state: TrainState,
     samples: Array,
     weights: Array,
 ) -> tuple[TrainState, Array]:
@@ -35,7 +35,7 @@ def update_policy(
 
     Args:
         policy: Policy object with log_prob method.
-        policy_state: Current training state with parameters and optimizer.
+        state: Current training state with parameters and optimizer.
         samples: Batch of samples to fit.
         weights: Importance weights for each sample.
 
@@ -47,16 +47,16 @@ def update_policy(
         log_probs = jax.vmap(lambda s: policy.log_prob(s, params))(samples)
         return -1.0 * jnp.sum(weights * log_probs)
 
-    loss, grads = jax.value_and_grad(loss_fn)(policy_state.params)
-    policy_state = policy_state.apply_gradients(grads=grads)
-    return policy_state, loss
+    loss, grads = jax.value_and_grad(loss_fn)(state.params)
+    state = state.apply_gradients(grads=grads)
+    return state, loss
 
 
 def optimize_policy(
     rng_key: Array,
     func: Callable,
     policy: Policy,
-    policy_state: TrainState,
+    state: TrainState,
     config: REPSConfig,
 ) -> OptimizationResult:
     """
@@ -66,7 +66,7 @@ def optimize_policy(
         rng_key: JAX PRNG key for stochastic sampling.
         func: Objective function to maximize. Maps (key, sample) to scalar value.
         policy: Policy defining the search distribution family.
-        policy_state: Initial training state containing policy parameters.
+        state: Initial training state containing policy parameters.
         config: REPS configuration.
 
     Returns:
@@ -76,7 +76,7 @@ def optimize_policy(
 
     def optimization_step(
         rng_key: Array,
-        policy_state: TrainState,
+        state: TrainState,
         iteration: int,
     ) -> tuple[TrainState, StepInfo]:
         """Single REPS iteration."""
@@ -84,7 +84,7 @@ def optimize_policy(
 
         # Sample from current policy
         sample_keys = random.split(sample_key, config.num_samples)
-        samples, log_probs = jax.vmap(lambda k: policy.sample_and_log_prob(k, policy_state.params))(sample_keys)
+        samples, log_probs = jax.vmap(lambda k: policy.sample_and_log_prob(k, state.params))(sample_keys)
 
         # Evaluate objective
         func_keys = random.split(func_key, config.num_samples)
@@ -103,23 +103,23 @@ def optimize_policy(
         for idx in batch_indices:
             samples_batch = jax.tree_util.tree_map(lambda x: x[idx, ...], samples)
             weights_batch = jax.tree_util.tree_map(lambda x: x[idx, ...], weights)
-            policy_state, _ = update_policy(
+            state, _ = update_policy(
                 policy=policy,
-                policy_state=policy_state,
+                state=state,
                 samples=samples_batch,
                 weights=weights_batch,
             )
 
-        return policy_state, StepInfo(
+        return state, StepInfo(
             mean_value=jnp.mean(values),
-            entropy=policy.entropy(policy_state.params),
+            entropy=policy.entropy(state.params),
             temperature=tau,
         )
 
     # Policy search loop
     for iteration in range(config.max_iterations):
         rng_key, step_key = random.split(rng_key)
-        policy_state, info = optimization_step(step_key, policy_state, iteration)
+        state, info = optimization_step(step_key, state, iteration)
 
         history["value"].append(float(info.mean_value))
         history["entropy"].append(float(info.entropy))
@@ -137,4 +137,4 @@ def optimize_policy(
             verbose=config.verbose,
         )
 
-    return OptimizationResult(policy_state=policy_state, history=history)
+    return OptimizationResult(state=state, history=history)

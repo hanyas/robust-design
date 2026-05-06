@@ -7,7 +7,9 @@ from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 
+from jax.scipy.special import ndtri
 from jax.scipy.stats import multivariate_normal
+from jax.scipy.stats import norm
 from jax.scipy.special import betaln, gammaln, digamma, logsumexp
 
 
@@ -18,6 +20,7 @@ class Gaussian(NamedTuple):
         mean: Mean vector μ, shape (d,)
         cov: Covariance matrix Σ, shape (d, d)
     """
+
     mean: Array
     cov: Array
 
@@ -44,6 +47,49 @@ class Gaussian(NamedTuple):
         """
         return multivariate_normal.logpdf(value, self.mean, self.cov)
 
+    def logpdf_batch(self, value: Array) -> Array:
+        """Compute log density for a batch with arbitrary leading dimensions."""
+        diff = value - self.mean
+        precision = self.precision()
+        mahal = jnp.einsum("...i,ij,...j->...", diff, precision, diff)
+        _, logdet = jnp.linalg.slogdet(self.cov)
+        return -0.5 * (mahal + self.dim * jnp.log(2.0 * jnp.pi) + logdet)
+
+    def logpdf_and_grad_batch(self, value: Array) -> tuple[Array, Array]:
+        """Compute log density and gradient for a batch of values."""
+        diff = value - self.mean
+        precision = self.precision()
+        logpdf = self.logpdf_batch(value)
+        grad = -jnp.einsum("ij,...j->...i", precision, diff)
+        return logpdf, grad
+
+    def marginal_quantiles(self, levels: Array) -> Array:
+        """
+        Coordinatewise Gaussian quantiles, shape ``(dim, num_levels)``.
+        """
+        levels = jnp.asarray(levels, dtype=self.mean.dtype).reshape(-1)
+        stddev = jnp.sqrt(jnp.maximum(jnp.diag(self.cov), 1e-12))
+        return self.mean[:, None] + stddev[:, None] * ndtri(levels)[None, :]
+
+    def marginal_cdf(self, value: Array) -> Array:
+        """Coordinatewise Gaussian CDF values."""
+        value = jnp.atleast_1d(jnp.asarray(value, dtype=self.mean.dtype)).reshape(-1)
+        if value.size != self.dim:
+            raise ValueError("Gaussian.marginal_cdf expects one value per coordinate.")
+        stddev = jnp.sqrt(jnp.maximum(jnp.diag(self.cov), 1e-12))
+        return norm.cdf(value, loc=self.mean, scale=stddev)
+
+    def marginal_crps(self, value: Array) -> Array:
+        """Coordinatewise Gaussian CRPS values."""
+        value = jnp.atleast_1d(jnp.asarray(value, dtype=self.mean.dtype)).reshape(-1)
+        if value.size != self.dim:
+            raise ValueError("Gaussian.marginal_crps expects one value per coordinate.")
+        stddev = jnp.sqrt(jnp.maximum(jnp.diag(self.cov), 1e-12))
+        z = (value - self.mean) / stddev
+        phi = jnp.exp(norm.logpdf(z))
+        Phi = norm.cdf(z)
+        return stddev * (z * (2.0 * Phi - 1.0) + 2.0 * phi - 1.0 / jnp.sqrt(jnp.pi))
+
     @property
     def dim(self) -> int:
         """Dimension of the distribution."""
@@ -61,7 +107,7 @@ class Gaussian(NamedTuple):
         _, logdet = jnp.linalg.slogdet(self.cov)
         return 0.5 * d * jnp.log(2 * jnp.pi * jnp.e) + 0.5 * logdet
 
-    def kl_to(self, other: 'Gaussian') -> float:
+    def kl_to(self, other: "Gaussian") -> float:
         """Compute KL divergence to another Gaussian.
 
         Args:
@@ -89,7 +135,7 @@ class Gaussian(NamedTuple):
 
         return 0.5 * (trace_term + quad_term - d + logdet_term)
 
-    def renyi_to(self, other: 'Gaussian', alpha: float) -> float:
+    def renyi_to(self, other: "Gaussian", alpha: float) -> float:
         """Compute Rényi divergence of order α to another Gaussian.
 
         Args:
@@ -106,10 +152,7 @@ class Gaussian(NamedTuple):
         Sigma_alpha = jnp.linalg.inv(Sigma_alpha_inv)
 
         # Mean of the geometric mixture
-        mu_alpha = Sigma_alpha @ (
-            alpha * self.precision() @ self.mean
-            + (1 - alpha) * other.precision() @ other.mean
-        )
+        mu_alpha = Sigma_alpha @ (alpha * self.precision() @ self.mean + (1 - alpha) * other.precision() @ other.mean)
 
         # Log-normalizer helper: 0.5 * (k log(2π) + log|Σ|)
         def log_Z_val(logdet_sigma):
@@ -166,8 +209,9 @@ class Beta(NamedTuple):
         delta: Shape parameter δ > 0, array of shape (2,) for [group_A, group_B]
         gamma: Shape parameter γ > 0, array of shape (2,) for [group_A, group_B]
     """
+
     delta: Array  # shape (2,) - corresponds to δ in the paper
-    gamma: Array   # shape (2,) - corresponds to γ in the paper
+    gamma: Array  # shape (2,) - corresponds to γ in the paper
 
     @property
     def mean(self) -> Array:
@@ -178,7 +222,7 @@ class Beta(NamedTuple):
     def var(self) -> Array:
         """Var[θ] = δγ / [(δ + γ)² (δ + γ + 1)]"""
         total = self.delta + self.gamma
-        return (self.delta * self.gamma) / (total ** 2 * (total + 1))
+        return (self.delta * self.gamma) / (total**2 * (total + 1))
 
     @property
     def concentration(self) -> Array:
@@ -193,7 +237,7 @@ class Beta(NamedTuple):
         """Log normalizing constant: log B(δ, γ)"""
         return betaln(self.delta, self.gamma)
 
-    def kl_to(self, other: 'Beta') -> Array:
+    def kl_to(self, other: "Beta") -> Array:
         """
         KL divergence D_KL(self || other).
         """
@@ -202,13 +246,14 @@ class Beta(NamedTuple):
         psi_self_total = digamma(self.delta + self.gamma)
 
         kl = (
-            betaln(other.delta, other.gamma) - betaln(self.delta, self.gamma) +
-            (self.delta - other.delta) * (psi_self_delta - psi_self_total) +
-            (self.gamma - other.gamma) * (psi_self_gamma - psi_self_total)
+            betaln(other.delta, other.gamma)
+            - betaln(self.delta, self.gamma)
+            + (self.delta - other.delta) * (psi_self_delta - psi_self_total)
+            + (self.gamma - other.gamma) * (psi_self_gamma - psi_self_total)
         )
         return jnp.sum(kl)
 
-    def renyi_to(self, other: 'Beta', alpha: float) -> float:
+    def renyi_to(self, other: "Beta", alpha: float) -> float:
         """
         Compute Rényi divergence D_α(self || other) for Beta distributions.
         """

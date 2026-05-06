@@ -51,6 +51,10 @@ class BoxGaussian(Policy):
         """Sample and compute log probability."""
         return self._get_distribution(params).sample_and_log_prob(seed=rng_key)
 
+    def mean(self, params: dict) -> Array:
+        """Push the Gaussian location parameter through the bijector."""
+        return self._bijector.forward(params["mean"])
+
     def entropy(self, params: dict) -> Array:
         """Compute entropy of the base Gaussian."""
         log_std = params["log_std"]

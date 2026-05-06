@@ -30,7 +30,6 @@ class HighDimLinearGaussian(LinearGaussian):
         return design.reshape(1, -1)
 
 
-
 # Settings
 DIM = 10
 NOISE_STDDEV = 1e-1
@@ -52,7 +51,7 @@ policy = BoxGaussian(
     dim=DIM,
     bijector=Tanh(),
     init_mean=lambda k, s: jr.normal(k, s) * 0.1,
-    init_log_std=lambda k, s: jnp.zeros(s)
+    init_log_std=lambda k, s: jnp.zeros(s),
 )
 
 # Setup REPS
@@ -61,8 +60,9 @@ config = REPSConfig(
     batch_size=32,
     max_iterations=1000,
     log_interval=100,
-    lmbda=LAMBDA
+    lmbda=LAMBDA,
 )
+
 
 # Define objective function for REPS
 def objective_fn(key: Array, design: Array, log_prob: Array, lmbda: float) -> float:
@@ -72,9 +72,10 @@ def objective_fn(key: Array, design: Array, log_prob: Array, lmbda: float) -> fl
         design=design,
         num_outer=NUM_OUTER,
         num_inner=NUM_INNER,
-        alpha=ALPHA
+        alpha=ALPHA,
     )
     return mi - (1.0 / lmbda) * log_prob
+
 
 # Optimization
 print(f"Running REPS optimization in {DIM} dimensions...")
@@ -82,20 +83,20 @@ rng_key = jr.PRNGKey(0)
 init_key, run_key = jr.split(rng_key)
 
 optimizer = optax.adam(learning_rate=1e-2)
-policy_state = policy.init_state(init_key, optimizer)
+state = policy.init_state(init_key, optimizer)
 
 result = optimize_policy(
     rng_key=run_key,
     func=objective_fn,
     policy=policy,
-    policy_state=policy_state,
-    config=config
+    state=state,
+    config=config,
 )
 
 # --- Analysis ---
 
 # Extract final approximate mode design
-final_mu = result.policy_state.params["mean"]
+final_mu = result.state.params["mean"]
 final_design = jnp.tanh(final_mu)
 
 # True Optimum: All ones
@@ -120,26 +121,26 @@ print(f"Regret:             {regret:.4f}")
 hist = result.history
 fig, axes = plt.subplots(1, 4, figsize=(20, 5))
 
-axes[0].plot(hist["value"], color='0.15')
+axes[0].plot(hist["value"], color="0.15")
 axes[0].set_title("Mean Reward (MI)")
 axes[0].set_xlabel("Iteration")
 
-axes[1].plot(hist["temperature"], color='0.15')
+axes[1].plot(hist["temperature"], color="0.15")
 axes[1].set_title("Temperature (tau)")
 axes[1].set_xlabel("Iteration")
 
-axes[2].plot(hist["entropy"], color='0.15')
+axes[2].plot(hist["entropy"], color="0.15")
 axes[2].set_title("Policy Entropy")
 axes[2].set_xlabel("Iteration")
 
 # 4. Histogram of Policy Samples
 sample_key, _ = jr.split(run_key)
 sample_keys = jr.split(sample_key, 1024)
-many_samples = jax.vmap(lambda k: policy.sample(k, result.policy_state.params))(sample_keys)
+many_samples = jax.vmap(lambda k: policy.sample(k, result.state.params))(sample_keys)
 
-axes[3].hist(many_samples.ravel(), bins=50, color='0.65', edgecolor='black', alpha=0.7)
-axes[3].axvline(-1.0, color='0.15', linestyle='--', linewidth=1)
-axes[3].axvline(1.0, color='0.15', linestyle='--', linewidth=1)
+axes[3].hist(many_samples.ravel(), bins=50, color="0.65", edgecolor="black", alpha=0.7)
+axes[3].axvline(-1.0, color="0.15", linestyle="--", linewidth=1)
+axes[3].axvline(1.0, color="0.15", linestyle="--", linewidth=1)
 axes[3].set_title("Policy Distribution")
 axes[3].set_xlabel("Design Value")
 

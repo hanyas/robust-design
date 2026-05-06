@@ -20,6 +20,7 @@ class LinearGaussian(NamedTuple):
     Args:
         noise_stddev: Observation noise standard deviation σ.
     """
+
     noise_stddev: float
 
     def design_matrix(self, design: Array) -> Array:
@@ -27,13 +28,13 @@ class LinearGaussian(NamedTuple):
         Construct the design matrix H(ξ).
 
         Args:
-            design: Raw design array.
+            design: Raw design array or scalar design point.
 
         Returns:
             Design matrix H(ξ), shape (N, D)
         """
+        design = jnp.atleast_1d(jnp.asarray(design))
         size = design.shape[0]
-        design = jnp.atleast_1d(design)
         return jnp.column_stack([design, jnp.ones(size)])
 
     def sample(self, rng_key: Array, design: Array, theta: Array) -> Array:
@@ -69,6 +70,34 @@ class LinearGaussian(NamedTuple):
         cov = self.cov(design)
         return multivariate_normal.logpdf(x, mean, cov)
 
+    def logpdf_batch(self, x: Array, design: Array, theta: Array) -> Array:
+        """
+        Compute log p(x | θ, ξ) for batches with arbitrary leading dimensions.
+        """
+        H = self.design_matrix(design)
+        sigma2 = self.noise_stddev**2
+        mean = jnp.einsum("...d,nd->...n", theta, H)
+        residual = jnp.broadcast_to(x, mean.shape) - mean
+        num_observations = H.shape[0]
+        return -0.5 * (jnp.sum(residual**2, axis=-1) / sigma2 + num_observations * jnp.log(2.0 * jnp.pi * sigma2))
+
+    def logpdf_and_grad_batch(
+        self,
+        x: Array,
+        design: Array,
+        theta: Array,
+    ) -> tuple[Array, Array]:
+        """
+        Compute batched log likelihoods and gradients with respect to theta.
+        """
+        H = self.design_matrix(design)
+        sigma2 = self.noise_stddev**2
+        mean = jnp.einsum("...d,nd->...n", theta, H)
+        residual = jnp.broadcast_to(x, mean.shape) - mean
+        logpdf = -0.5 * (jnp.sum(residual**2, axis=-1) / sigma2 + H.shape[0] * jnp.log(2.0 * jnp.pi * sigma2))
+        grad = jnp.einsum("nd,...n->...d", H, residual) / sigma2
+        return logpdf, grad
+
     def mean(self, design: Array, theta: Array) -> Array:
         """
         Compute the mean of p(x | θ, ξ) = H(ξ)θ.
@@ -96,6 +125,14 @@ class LinearGaussian(NamedTuple):
         num_observations = self.design_matrix(design).shape[0]
         return self.noise_stddev**2 * jnp.eye(num_observations)
 
+    def power_upper_bound(self, design: Array, alpha: float, x: Array | None = None) -> Array:
+        """
+        Upper bound M(x) >= sup_theta p(x | theta, xi)^alpha for the Gaussian likelihood.
+        """
+        num_observations = self.design_matrix(design).shape[0]
+        log_peak_density = -0.5 * num_observations * jnp.log(2.0 * jnp.pi * self.noise_stddev**2)
+        return jnp.exp(alpha * log_peak_density)
+
 
 class LinearRegression(NamedTuple):
     """
@@ -105,8 +142,13 @@ class LinearRegression(NamedTuple):
         prior: Gaussian prior over parameters θ.
         likelihood: Gaussian linear likelihood p(x | θ, ξ).
     """
+
     prior: Gaussian
     likelihood: LinearGaussian
+
+    def with_prior(self, prior: Gaussian) -> "LinearRegression":
+        """Return the same model with a replaced belief state."""
+        return self._replace(prior=prior)
 
     # =========================================================================
     # Bayesian Inference
@@ -124,20 +166,18 @@ class LinearRegression(NamedTuple):
             Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
+        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.prior.mean.dtype))
         prior_prec = jnp.linalg.inv(self.prior.cov)
         lklhd_cov = self.likelihood.cov(design)
 
         # Posterior precision
-        posterior_prec = prior_prec + H.T @ jnp.linalg.inv(lklhd_cov) @ H
+        posterior_prec = prior_prec + H.T @ jnp.linalg.solve(lklhd_cov, H)
 
         # Posterior covariance
         posterior_cov = jnp.linalg.inv(posterior_prec)
 
         # Posterior mean
-        posterior_mean = posterior_cov @ (
-            prior_prec @ self.prior.mean
-            + H.T @ jnp.linalg.inv(lklhd_cov) @ x
-        )
+        posterior_mean = posterior_cov @ (prior_prec @ self.prior.mean + H.T @ jnp.linalg.solve(lklhd_cov, x))
 
         return Gaussian(mean=posterior_mean, cov=posterior_cov)
 
@@ -152,28 +192,22 @@ class LinearRegression(NamedTuple):
             Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
-        return Gaussian(
-            mean=H @ self.prior.mean,
-            cov=H @ self.prior.cov @ H.T + self.likelihood.cov(design)
-        )
+        return Gaussian(mean=H @ self.prior.mean, cov=H @ self.prior.cov @ H.T + self.likelihood.cov(design))
 
-    def get_posterior_predictive(self, posterior: Gaussian, design: Array, alpha=float) -> Gaussian:
+    def get_posterior_predictive(self, posterior: Gaussian, design: Array, alpha: float = 1.0) -> Gaussian:
         """
-        Compute posterior predictive distribution p(x_new | x, ξ, ξ_new).
+        Compute the robust posterior predictive distribution induced by ``alpha``.
 
         Args:
-            posterior: Posterior distribution.
+            posterior: Posterior or tilted-posterior distribution.
             design: Raw design array.
-            alpha: Misspecification order α ∈ (0, 1).
+            alpha: Misspecification order α ∈ (0, 1].
 
         Returns:
             Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
-        return Gaussian(
-            mean=H @ posterior.mean,
-            cov=H @ posterior.cov @ H.T + self.likelihood.cov(design) / alpha
-        )
+        return Gaussian(mean=H @ posterior.mean, cov=self.likelihood.cov(design) + alpha * H @ posterior.cov @ H.T)
 
     # =========================================================================
     # Robust Inference
@@ -191,10 +225,7 @@ class LinearRegression(NamedTuple):
             Gaussian distribution.
         """
         H = self.likelihood.design_matrix(design)
-        return Gaussian(
-            mean=H @ self.prior.mean,
-            cov=alpha * H @ self.prior.cov @ H.T + self.likelihood.cov(design)
-        )
+        return Gaussian(mean=H @ self.prior.mean, cov=alpha * H @ self.prior.cov @ H.T + self.likelihood.cov(design))
 
     def get_tilted_posterior(self, x: Array, design: Array, alpha: float) -> Gaussian:
         """
@@ -209,20 +240,18 @@ class LinearRegression(NamedTuple):
             Gaussian α-tilted posterior distribution.
         """
         H = self.likelihood.design_matrix(design)
+        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.prior.mean.dtype))
         prior_prec = self.prior.precision()
         lklhd_cov_alpha = self.likelihood.cov(design) / alpha
 
         # Tilted posterior precision
-        posterior_prec = prior_prec + H.T @ jnp.linalg.inv(lklhd_cov_alpha) @ H
+        posterior_prec = prior_prec + H.T @ jnp.linalg.solve(lklhd_cov_alpha, H)
 
         # Tilted posterior covariance
         posterior_cov = jnp.linalg.inv(posterior_prec)
 
         # Tilted posterior mean
-        posterior_mean = posterior_cov @ (
-            prior_prec @ self.prior.mean
-            + H.T @ jnp.linalg.inv(lklhd_cov_alpha) @ x
-        )
+        posterior_mean = posterior_cov @ (prior_prec @ self.prior.mean + H.T @ jnp.linalg.solve(lklhd_cov_alpha, x))
 
         return Gaussian(mean=posterior_mean, cov=posterior_cov)
 
@@ -248,10 +277,7 @@ class LinearRegression(NamedTuple):
         posterior_cov = jnp.linalg.inv(posterior_prec)
 
         # Mean: [θ, x]
-        mean = jnp.concatenate([
-            self.prior.mean,
-            H @ self.prior.mean
-        ])
+        mean = jnp.concatenate([self.prior.mean, H @ self.prior.mean])
 
         # Covariance blocks
         prior_cov = self.prior.cov
@@ -259,10 +285,12 @@ class LinearRegression(NamedTuple):
         tilted_cov = H @ prior_cov @ H.T + lklhd_cov_alpha
 
         # Assemble covariance matrix
-        cov = jnp.block([
-            [alpha * prior_cov + (1 - alpha) * posterior_cov,   alpha * cross_cov],
-            [alpha * cross_cov.T,                               alpha * tilted_cov]
-        ])
+        cov = jnp.block(
+            [
+                [alpha * prior_cov + (1 - alpha) * posterior_cov, alpha * cross_cov],
+                [alpha * cross_cov.T, alpha * tilted_cov],
+            ]
+        )
 
         return Gaussian(mean=mean, cov=cov)
 
@@ -306,24 +334,30 @@ class LinearRegression(NamedTuple):
 
         return 0.5 * (log_det_tilted - log_det_scaled_noise)
 
+    def sibson_mi_grad(self, design: Array, alpha: float) -> Array:
+        """
+        Closed-form gradient of Sibson's α-mutual information for linear regression.
+        """
+        if self.prior.dim != 2:
+            raise ValueError(
+                "sibson_mi_grad currently assumes the linear-regression design "
+                "matrix H(xi) = [xi, 1], which requires prior dim = 2."
+            )
+
+        H = self.likelihood.design_matrix(design)
+        tilted_cov = self.get_tilted_marginal(design, alpha).cov
+        slope_cov_column = self.prior.cov[:, 0]
+        sensitivity = H @ slope_cov_column
+        return alpha * jnp.linalg.solve(tilted_cov, sensitivity)
+
     def power_geig(self, design: Array, omega: float) -> float:
         """
         Compute the exact power-likelihood Gibbs EIG for linear-Gaussian design.
-
-        For a Gaussian likelihood with fixed noise variance, the power-likelihood
-        Gibbs EIG is a design-independent rescaling of the Sibson objective:
-
-            EIG_Gibbs(ξ; ω) = c(ω, N, σ^2) * I^S_ω(θ; x | ξ),
-
-        where N is the number of observations in the batch. The proportionality
-        is exact, so Power-GEIG and Sibson induce the same optimal designs in
-        this conjugate setting.
         """
         num_observations = self.likelihood.design_matrix(design).shape[0]
-        noise_var = self.likelihood.noise_stddev ** 2
-        scale = (
-            (2.0 * jnp.pi * noise_var) ** (0.5 * num_observations * (1.0 - omega))
-            * omega ** (-0.5 * num_observations)
+        noise_var = self.likelihood.noise_stddev**2
+        scale = (2.0 * jnp.pi * noise_var) ** (0.5 * num_observations * (1.0 - omega)) * omega ** (
+            -0.5 * num_observations
         )
         return scale * self.sibson_mi(design, omega)
 

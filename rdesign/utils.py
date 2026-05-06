@@ -1,11 +1,9 @@
-from typing import Any, NamedTuple
+from typing import NamedTuple
 from functools import partial
 import math
 
 import jax
 from jax import Array, random, numpy as jnp
-
-from rdesign.base import Prior, Likelihood, Distribution
 
 
 def inv_sqrt_schedule(t: int, tau_init: float) -> float:
@@ -107,9 +105,7 @@ def nested_mc_sibson_mi(
     # 2. For each outer theta, sample x ~ p(x | xi, theta)
     rng_key, sub_key = random.split(rng_key)
     x_keys = random.split(sub_key, num_outer)
-    x_samples = jax.vmap(lambda k, theta: model.likelihood.sample(k, design, theta))(
-        x_keys, outer_thetas
-    )
+    x_samples = jax.vmap(lambda k, theta: model.likelihood.sample(k, design, theta))(x_keys, outer_thetas)
 
     # 3. Inner integral: for each (x, theta), approximate
     #    g(x) = ∫ p(θ) [p(x|ξ,θ) / p(x|ξ)]^α dθ
@@ -163,9 +159,7 @@ def nested_mc_sibson_mi_with_marginal(
     # 2. For each outer theta, sample x ~ p(x | xi, theta)
     rng_key, sub_key = random.split(rng_key)
     x_keys = random.split(sub_key, num_outer)
-    x_samples = jax.vmap(lambda k, theta: model.likelihood.sample(k, design, theta))(
-        x_keys, outer_thetas
-    )
+    x_samples = jax.vmap(lambda k, theta: model.likelihood.sample(k, design, theta))(x_keys, outer_thetas)
 
     # 3. Inner integral: for each (x, theta), approximate
     #    g(x) = ∫ p(θ) [p(x|ξ,θ) / p(x|ξ)]^α dθ

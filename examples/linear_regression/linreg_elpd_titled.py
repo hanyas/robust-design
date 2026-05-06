@@ -3,6 +3,8 @@ Posterior Predictive Performance for Misspecified Linear Regression
 """
 from typing import NamedTuple
 
+import numpy as np
+
 import jax
 from jax import Array
 import jax.numpy as jnp
@@ -32,6 +34,11 @@ def custom_split(rng_key: Array, num_splits: int) -> Array:
     keys = jr.split(rng_key, num_splits)
     return keys[0], keys[1:]
 
+
+def build_alpha_grid() -> Array:
+    """Log-spaced robustness orders from 1e-2 to 1."""
+    return jnp.asarray(np.geomspace(1e-2, 1.0, 21), dtype=jnp.float64)
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -39,8 +46,7 @@ def custom_split(rng_key: Array, num_splits: int) -> Array:
 rng_key = jr.PRNGKey(42)
 
 # Alpha values to evaluate
-decades = 10.0 ** jnp.arange(-2, 0)
-alpha_values = jnp.concatenate([jnp.arange(1, 11) * d for d in decades])
+alpha_values = build_alpha_grid()
 num_alphas = len(alpha_values)
 
 # Experiment parameters

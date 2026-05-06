@@ -24,26 +24,20 @@ class BetaBinomial(NamedTuple):
     Beta-Binomial distribution
     Represents the marginal likelihood or predictive distribution.
     """
+
     trials: Array  # shape (2,) for [n_a, n_b]
-    delta: Array   # shape (2,)
-    gamma: Array   # shape (2,)
+    delta: Array  # shape (2,)
+    gamma: Array  # shape (2,)
 
     def logpmf(self, x: Array) -> float:
         """
         Compute log probability mass function.
         """
         # Log Binomial coefficient
-        log_binom = (
-            gammaln(self.trials + 1)
-            - gammaln(x + 1)
-            - gammaln(self.trials - x + 1)
-        )
+        log_binom = gammaln(self.trials + 1) - gammaln(x + 1) - gammaln(self.trials - x + 1)
 
         # Log Beta function ratio
-        log_beta_ratio = (
-            betaln(self.delta + x, self.gamma + self.trials - x) -
-            betaln(self.delta, self.gamma)
-        )
+        log_beta_ratio = betaln(self.delta + x, self.gamma + self.trials - x) - betaln(self.delta, self.gamma)
 
         # Sum over groups
         return jnp.sum(jnp.where(self.trials > 0, log_binom + log_beta_ratio, 0.0))
@@ -60,15 +54,69 @@ class BetaBinomial(NamedTuple):
         # 2. Sample x from Binomial using theta
         return jr.binomial(key_x, self.trials.astype(int), theta)
 
+    def _group_logpmf(self, k: Array, n: Array, d: Array, g: Array) -> Array:
+        mask = (k >= 0) & (k <= n)
+        safe_k = jnp.where(mask, k, 0.0)
+        safe_nmk = jnp.where(mask, n - safe_k, 0.0)
+        log_binom = gammaln(n + 1) - gammaln(safe_k + 1) - gammaln(safe_nmk + 1)
+        log_beta_ratio = betaln(d + safe_k, g + safe_nmk) - betaln(d, g)
+        return jnp.where(mask, log_binom + log_beta_ratio, -jnp.inf)
+
+    def _group_pmf_grid(self, n: Array, d: Array, g: Array) -> tuple[Array, Array]:
+        grid = jnp.arange(int(n) + 1, dtype=self.trials.dtype)
+        log_pmf = self._group_logpmf(grid, n, d, g)
+        pmf = jnp.exp(log_pmf - logsumexp(log_pmf))
+        return grid, pmf
+
+    def marginal_cdf(self, x: Array) -> Array:
+        """Coordinatewise Beta-Binomial CDF values."""
+        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.trials.dtype)).reshape(-1)
+        if x.size != self.trials.size:
+            raise ValueError("marginal_cdf expects one value per group.")
+
+        cdfs = []
+        for x_i, n_i, d_i, g_i in zip(x, self.trials, self.delta, self.gamma):
+            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
+            cdfs.append(jnp.sum(jnp.where(grid <= jnp.floor(x_i), pmf, 0.0)))
+        return jnp.stack(cdfs)
+
+    def marginal_quantiles(self, levels: Array) -> Array:
+        """Coordinatewise Beta-Binomial quantiles."""
+        levels = jnp.asarray(levels, dtype=self.trials.dtype).reshape(-1)
+        quantiles = []
+        for n_i, d_i, g_i in zip(self.trials, self.delta, self.gamma):
+            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
+            cdf = jnp.cumsum(pmf)
+            indices = jnp.searchsorted(cdf, levels, side="left")
+            indices = jnp.clip(indices, 0, grid.size - 1)
+            quantiles.append(grid[indices])
+        return jnp.stack(quantiles)
+
+    def marginal_crps(self, x: Array) -> Array:
+        """Coordinatewise Beta-Binomial CRPS values."""
+        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.trials.dtype)).reshape(-1)
+        if x.size != self.trials.size:
+            raise ValueError("marginal_crps expects one value per group.")
+
+        crps = []
+        for x_i, n_i, d_i, g_i in zip(x, self.trials, self.delta, self.gamma):
+            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
+            pairwise = jnp.abs(grid[:, None] - grid[None, :])
+            first_term = jnp.sum(pmf * jnp.abs(grid - x_i))
+            second_term = 0.5 * jnp.sum(pmf[:, None] * pmf[None, :] * pairwise)
+            crps.append(first_term - second_term)
+        return jnp.stack(crps)
+
 
 class TiltedBetaBinomial(NamedTuple):
     """
     α-tilted Marginal distribution p_α(x | ξ).
     Optimized for JAX with vectorization over groups.
     """
+
     trials: Array  # shape (2,)
-    delta: Array   # shape (2,)
-    gamma: Array   # shape (2,)
+    delta: Array  # shape (2,)
+    gamma: Array  # shape (2,)
     alpha: float
     max_n: int
 
@@ -87,10 +135,7 @@ class TiltedBetaBinomial(NamedTuple):
 
         # Log Beta ratio term
         # Paper Appendix C.2: B(δ + αx, γ + α(n-x)) / B(δ, γ)
-        log_beta_ratio = (
-            betaln(d + self.alpha * safe_k, g + self.alpha * safe_nmk) -
-            betaln(d, g)
-        )
+        log_beta_ratio = betaln(d + self.alpha * safe_k, g + self.alpha * safe_nmk) - betaln(d, g)
 
         # Combine: log(Z^(1/α)) = log(Z) / α
         # = (α * log_binom + log_beta_ratio) / α
@@ -98,19 +143,19 @@ class TiltedBetaBinomial(NamedTuple):
         return jnp.where(mask, log_binom + (log_beta_ratio / self.alpha), -jnp.inf)
 
     def log_normalizer(self, n: Array, d: Array, g: Array) -> Array:
-            """
-            Compute log Z_α = log sum_k (p(k|...)^α)^(1/α).
-            Public method required for Sibson MI.
-            """
-            # 1. Create grid of all possible outcomes [0...max_n]
-            k_grid = jnp.arange(self.max_n + 1, dtype=jnp.float32)
+        """
+        Compute log Z_α = log sum_k (p(k|...)^α)^(1/α).
+        Public method required for Sibson MI.
+        """
+        # 1. Create grid of all possible outcomes [0...max_n]
+        k_grid = jnp.arange(self.max_n + 1, dtype=jnp.float32)
 
-            # 2. Compute unnormalized kernel for every k
-            # We broadcast n, d, g against the grid k
-            log_kernel = self._log_tilted_kernel(k_grid, n, d, g)
+        # 2. Compute unnormalized kernel for every k
+        # We broadcast n, d, g against the grid k
+        log_kernel = self._log_tilted_kernel(k_grid, n, d, g)
 
-            # 3. Sum over k
-            return logsumexp(log_kernel)
+        # 3. Sum over k
+        return logsumexp(log_kernel)
 
     def logpmf(self, x: Array) -> Array:
         """Compute normalized log p_α(x)."""
@@ -169,11 +214,57 @@ class TiltedBetaBinomial(NamedTuple):
 
         return jax.lax.cond(jnp.abs(self.alpha - 1.0) < 1e-3, standard_sample, tilted_sample, rng_key)
 
+    def _group_pmf_grid(self, n: Array, d: Array, g: Array) -> tuple[Array, Array]:
+        grid = jnp.arange(self.max_n + 1, dtype=self.trials.dtype)
+        log_kernel = self._log_tilted_kernel(grid, n, d, g)
+        pmf = jnp.exp(log_kernel - logsumexp(log_kernel))
+        return grid, pmf
+
+    def marginal_cdf(self, x: Array) -> Array:
+        """Coordinatewise tilted Beta-Binomial CDF values."""
+        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.trials.dtype)).reshape(-1)
+        if x.size != self.trials.size:
+            raise ValueError("marginal_cdf expects one value per group.")
+
+        cdfs = []
+        for x_i, n_i, d_i, g_i in zip(x, self.trials, self.delta, self.gamma):
+            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
+            cdfs.append(jnp.sum(jnp.where(grid <= jnp.floor(x_i), pmf, 0.0)))
+        return jnp.stack(cdfs)
+
+    def marginal_quantiles(self, levels: Array) -> Array:
+        """Coordinatewise tilted Beta-Binomial quantiles."""
+        levels = jnp.asarray(levels, dtype=self.trials.dtype).reshape(-1)
+        quantiles = []
+        for n_i, d_i, g_i in zip(self.trials, self.delta, self.gamma):
+            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
+            cdf = jnp.cumsum(pmf)
+            indices = jnp.searchsorted(cdf, levels, side="left")
+            indices = jnp.clip(indices, 0, grid.size - 1)
+            quantiles.append(grid[indices])
+        return jnp.stack(quantiles)
+
+    def marginal_crps(self, x: Array) -> Array:
+        """Coordinatewise tilted Beta-Binomial CRPS values."""
+        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.trials.dtype)).reshape(-1)
+        if x.size != self.trials.size:
+            raise ValueError("marginal_crps expects one value per group.")
+
+        crps = []
+        for x_i, n_i, d_i, g_i in zip(x, self.trials, self.delta, self.gamma):
+            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
+            pairwise = jnp.abs(grid[:, None] - grid[None, :])
+            first_term = jnp.sum(pmf * jnp.abs(grid - x_i))
+            second_term = 0.5 * jnp.sum(pmf[:, None] * pmf[None, :] * pairwise)
+            crps.append(first_term - second_term)
+        return jnp.stack(crps)
+
 
 class Binomial(NamedTuple):
     """
     Binomial likelihood for A/B testing.
     """
+
     num_participants: int
 
     def get_trials(self, design: Array) -> Array:
@@ -201,8 +292,13 @@ class ABTesting(NamedTuple):
         prior: Beta prior
         likelihood: Binomial
     """
+
     prior: Beta
     likelihood: Binomial
+
+    def with_prior(self, prior: Beta) -> "ABTesting":
+        """Return the same model with a replaced belief state."""
+        return self._replace(prior=prior)
 
     # =========================================================================
     # Bayesian Inference
@@ -222,10 +318,7 @@ class ABTesting(NamedTuple):
         trials = self.likelihood.get_trials(design)
         x = jnp.asarray(x, dtype=jnp.float32)
 
-        return Beta(
-            delta=self.prior.delta + x,
-            gamma=self.prior.gamma + trials - x
-        )
+        return Beta(delta=self.prior.delta + x, gamma=self.prior.gamma + trials - x)
 
     def get_marginal(self, design: Array) -> BetaBinomial:
         """
@@ -233,11 +326,7 @@ class ABTesting(NamedTuple):
         Returns a BetaBinomial distribution.
         """
         trials = self.likelihood.get_trials(design)
-        return BetaBinomial(
-            trials=trials,
-            delta=self.prior.delta,
-            gamma=self.prior.gamma
-        )
+        return BetaBinomial(trials=trials, delta=self.prior.delta, gamma=self.prior.gamma)
 
     def get_posterior_predictive(self, posterior: Beta, design: Array, alpha: float = 1.0) -> BetaBinomial:
         """
@@ -250,7 +339,7 @@ class ABTesting(NamedTuple):
             delta=posterior.delta,
             gamma=posterior.gamma,
             alpha=alpha,
-            max_n=self.likelihood.num_participants
+            max_n=self.likelihood.num_participants,
         )
 
     # =========================================================================
@@ -272,10 +361,7 @@ class ABTesting(NamedTuple):
         trials = self.likelihood.get_trials(design)
         x = jnp.asarray(x, dtype=jnp.float32)
 
-        return Beta(
-            delta=self.prior.delta + alpha * x,
-            gamma=self.prior.gamma + alpha * (trials - x)
-        )
+        return Beta(delta=self.prior.delta + alpha * x, gamma=self.prior.gamma + alpha * (trials - x))
 
     def get_tilted_marginal(self, design: Array, alpha: Array) -> TiltedBetaBinomial:
         """
@@ -288,7 +374,7 @@ class ABTesting(NamedTuple):
             delta=self.prior.delta,
             gamma=self.prior.gamma,
             alpha=alpha,
-            max_n=self.likelihood.num_participants
+            max_n=self.likelihood.num_participants,
         )
 
     # =========================================================================
@@ -310,8 +396,11 @@ class ABTesting(NamedTuple):
             # log p(x) for Beta-Binomial
             safe_n_minus_k = jnp.maximum(0, n - k_vals)
             log_px = (
-                gammaln(n + 1) - gammaln(k_vals + 1) - gammaln(safe_n_minus_k + 1)
-                + betaln(d + k_vals, g + safe_n_minus_k) - betaln(d, g)
+                gammaln(n + 1)
+                - gammaln(k_vals + 1)
+                - gammaln(safe_n_minus_k + 1)
+                + betaln(d + k_vals, g + safe_n_minus_k)
+                - betaln(d, g)
             )
             px = jnp.where(mask, jnp.exp(log_px), 0.0)
 
@@ -327,9 +416,10 @@ class ABTesting(NamedTuple):
 
             # KL divergence for Beta distributions
             kl = (
-                betaln(d, g) - betaln(safe_d_post, safe_g_post) +
-                (d_post - d) * (digamma(safe_d_post) - digamma(safe_total_post)) +
-                (g_post - g) * (digamma(safe_g_post) - digamma(safe_total_post))
+                betaln(d, g)
+                - betaln(safe_d_post, safe_g_post)
+                + (d_post - d) * (digamma(safe_d_post) - digamma(safe_total_post))
+                + (g_post - g) * (digamma(safe_g_post) - digamma(safe_total_post))
             )
 
             return jnp.sum(jnp.where(mask, px * kl, 0.0))
@@ -370,12 +460,7 @@ class ABTesting(NamedTuple):
         # 4. Switch based on proximity to 1.0
         is_shannon = jnp.isclose(alpha, 1.0, atol=1e-3)
 
-        return jax.lax.cond(
-            is_shannon,
-            lambda _: shannon_via_grad(),
-            lambda _: sibson_standard(),
-            operand=None
-        )
+        return jax.lax.cond(is_shannon, lambda _: shannon_via_grad(), lambda _: sibson_standard(), operand=None)
 
     def power_geig(self, design: Array, omega: Array) -> Array:
         """
@@ -395,11 +480,7 @@ class ABTesting(NamedTuple):
             safe_k = jnp.where(mask, k_vals, 0.0)
             safe_n_minus_k = jnp.where(mask, n - safe_k, 0.0)
 
-            log_binom = (
-                gammaln(n + 1.0)
-                - gammaln(safe_k + 1.0)
-                - gammaln(safe_n_minus_k + 1.0)
-            )
+            log_binom = gammaln(n + 1.0) - gammaln(safe_k + 1.0) - gammaln(safe_n_minus_k + 1.0)
 
             a = d + omega * safe_k
             b = g + omega * safe_n_minus_k
@@ -419,12 +500,8 @@ class ABTesting(NamedTuple):
             group_mass = jnp.sum(m_vals)
             return group_gain, group_mass
 
-        gain_a, mass_a = _group_power_geig(
-            trials[0], self.prior.delta[0], self.prior.gamma[0]
-        )
-        gain_b, mass_b = _group_power_geig(
-            trials[1], self.prior.delta[1], self.prior.gamma[1]
-        )
+        gain_a, mass_a = _group_power_geig(trials[0], self.prior.delta[0], self.prior.gamma[0])
+        gain_b, mass_b = _group_power_geig(trials[1], self.prior.delta[1], self.prior.gamma[1])
         return gain_a * mass_b + mass_a * gain_b
 
     def shannon_ig(self, x: Array, design: Array) -> Array:

@@ -1,6 +1,7 @@
 """
 Posterior Calibration Assessment for Misspecified A/B Testing
 """
+
 from typing import NamedTuple
 
 import jax
@@ -26,6 +27,7 @@ class TiltedBinomial(NamedTuple):
         num_participants: Total participants
         alpha: Tilting parameter.
     """
+
     num_participants: int
     alpha: float = 1.0
 
@@ -133,10 +135,7 @@ if __name__ == "__main__":
         delta=jnp.array([1.0, 500.0]),
         gamma=jnp.array([1.0, 500.0]),
     )
-    proc_lklhd = TiltedBinomial(
-        num_participants=num_participants,
-        alpha=alpha_true
-    )
+    proc_lklhd = TiltedBinomial(num_participants=num_participants, alpha=alpha_true)
 
     # Model (Beta-Binomial)
     mdl_prior = Beta(
@@ -195,12 +194,14 @@ if __name__ == "__main__":
 
         # Compute CDF values
         # Shape: (4, 2) where 2 is [Group A, Group B]
-        return jnp.array([
-            compute_marginal_cdf(post_opt_nom, theta_true),
-            compute_marginal_cdf(post_opt_rob, theta_true),
-            compute_marginal_cdf(post_rand_nom, theta_true),
-            compute_marginal_cdf(post_rand_rob, theta_true)
-        ])
+        return jnp.array(
+            [
+                compute_marginal_cdf(post_opt_nom, theta_true),
+                compute_marginal_cdf(post_opt_rob, theta_true),
+                compute_marginal_cdf(post_rand_nom, theta_true),
+                compute_marginal_cdf(post_rand_rob, theta_true),
+            ]
+        )
 
     # Batch run all trials
     trial_keys = jr.split(rng_key, num_trials)
@@ -231,13 +232,15 @@ if __name__ == "__main__":
     csv_path = "examples/ab_testing/data/abtesting_coverage.csv"
     with open(csv_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow([
-            "expected_levels",
-            "curve_opt_nom",
-            "curve_opt_rob",
-            "curve_rand_nom",
-            "curve_rand_rob",
-        ])
+        writer.writerow(
+            [
+                "expected_levels",
+                "curve_opt_nom",
+                "curve_opt_rob",
+                "curve_rand_nom",
+                "curve_rand_rob",
+            ]
+        )
         for row in zip(
             expected_levels.tolist(),
             curve_opt_nom.tolist(),
@@ -301,20 +304,26 @@ if __name__ == "__main__":
     fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 
     # Perfect calibration reference
-    ax.plot([0, 1], [0, 1], ':', color='0.2', lw=2, label='Perfect')
+    ax.plot([0, 1], [0, 1], ":", color="0.2", lw=2, label="Perfect")
 
     # Curves
     # Optimal designs (solid lines, dark colors)
-    ax.plot(expected_levels, curve_opt_nom, '--', color='0.1', lw=2.5, label=f'Nominal w/ Optimal (α={alpha_nominal:.1f})')
-    ax.plot(expected_levels, curve_opt_rob, '-', color='0.1', lw=2.5, label=f'Robust w/ Optimal (α={alpha_robust:.1f})')
+    ax.plot(
+        expected_levels, curve_opt_nom, "--", color="0.1", lw=2.5, label=f"Nominal w/ Optimal (α={alpha_nominal:.1f})"
+    )
+    ax.plot(expected_levels, curve_opt_rob, "-", color="0.1", lw=2.5, label=f"Robust w/ Optimal (α={alpha_robust:.1f})")
 
     # Random designs (dashed lines, lighter colors)
-    ax.plot(expected_levels, curve_rand_nom, '--', color='0.5', lw=2.5, label=f'Nominal w/ Uniform (α={alpha_nominal:.1f})')
-    ax.plot(expected_levels, curve_rand_rob, '-', color='0.5', lw=2.5, label=f'Robust w/ Uniform (α={alpha_robust:.1f})')
+    ax.plot(
+        expected_levels, curve_rand_nom, "--", color="0.5", lw=2.5, label=f"Nominal w/ Uniform (α={alpha_nominal:.1f})"
+    )
+    ax.plot(
+        expected_levels, curve_rand_rob, "-", color="0.5", lw=2.5, label=f"Robust w/ Uniform (α={alpha_robust:.1f})"
+    )
 
-    ax.set_xlabel('Expected Coverage', fontsize=12)
-    ax.set_ylabel('Actual Coverage', fontsize=12)
-    ax.legend(fontsize=10, loc='lower right')
+    ax.set_xlabel("Expected Coverage", fontsize=12)
+    ax.set_ylabel("Actual Coverage", fontsize=12)
+    ax.legend(fontsize=10, loc="lower right")
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True, alpha=0.3)

@@ -1,9 +1,11 @@
 """
 Posterior Predictive Performance for Misspecified Linear Regression
 """
+
 from typing import NamedTuple
 
 import csv
+import numpy as np
 
 import jax
 from jax import Array
@@ -25,6 +27,7 @@ class LinearStudentT(NamedTuple):
         noise_stddev: Noise standard deviation
         df: Degrees of freedom
     """
+
     df: float
     noise_stddev: float
 
@@ -74,6 +77,11 @@ def custom_split(rng_key: Array, num_splits: int) -> tuple[Array, Array]:
     return keys[0], keys[1:]
 
 
+def build_alpha_grid() -> Array:
+    """Log-spaced robustness orders from 1e-2 to 1."""
+    return jnp.asarray(np.geomspace(1e-2, 1.0, 21), dtype=jnp.float64)
+
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -81,14 +89,13 @@ def custom_split(rng_key: Array, num_splits: int) -> tuple[Array, Array]:
 rng_key = jr.PRNGKey(42)
 
 # Alpha values to evaluate
-decades = 10.0 ** jnp.arange(-2, 0)
-alpha_values = jnp.concatenate([jnp.arange(1, 11) * d for d in decades])
+alpha_values = build_alpha_grid()
 num_alphas = len(alpha_values)
 
 # Experiment parameters
 num_design_points = 2
 num_test_points = 32
-num_trials = 1024
+num_trials = int(4 * 1024)
 
 # Noise scale
 dim_theta = 2
@@ -199,7 +206,7 @@ se_elpd_unif = std_elpd_unif / jnp.sqrt(num_trials)
 
 print(f"\n{'α':>8} | {'Sibson Opt (mean ± SE)':>23} | {'Uniform (mean ± SE)':>20}")
 print("-" * 58)
-for alpha_target in [0.01, 0.05, 0.1, 0.2, 0.5, 1.0]:
+for alpha_target in [0.01, 0.05, 0.1, 0.5, 1.0]:
     idx = jnp.argmin(jnp.abs(alpha_values - alpha_target))
     print(
         f"{alpha_values[idx]:>8.3f} | "
@@ -223,41 +230,45 @@ q95_unif = jnp.percentile(elpd_uniform, 95, axis=1)
 csv_path = "examples/linear_regression/data/linreg_elpd_studentt.csv"
 with open(csv_path, "w", newline="") as csv_file:
     writer = csv.writer(csv_file)
-    writer.writerow([
-        "alpha",
-        "mean_opt",
-        "se_opt",
-        "q05_opt",
-        "q95_opt",
-        "mean_unif",
-        "se_unif",
-        "q05_unif",
-        "q95_unif",
-    ])
+    writer.writerow(
+        [
+            "alpha",
+            "mean_opt",
+            "se_opt",
+            "q05_opt",
+            "q95_opt",
+            "mean_unif",
+            "se_unif",
+            "q05_unif",
+            "q95_unif",
+        ]
+    )
     for idx in range(num_alphas):
-        writer.writerow([
-            float(alpha_values[idx]),
-            float(mean_elpd_opt[idx]),
-            float(se_elpd_opt[idx]),
-            float(q05_opt[idx]),
-            float(q95_opt[idx]),
-            float(mean_elpd_unif[idx]),
-            float(se_elpd_unif[idx]),
-            float(q05_unif[idx]),
-            float(q95_unif[idx]),
-        ])
+        writer.writerow(
+            [
+                float(alpha_values[idx]),
+                float(mean_elpd_opt[idx]),
+                float(se_elpd_opt[idx]),
+                float(q05_opt[idx]),
+                float(q95_opt[idx]),
+                float(mean_elpd_unif[idx]),
+                float(se_elpd_unif[idx]),
+                float(q05_unif[idx]),
+                float(q95_unif[idx]),
+            ]
+        )
 
-ax.plot(alpha_values, mean_elpd_opt, '-', color='0.1', lw=2.5, label='Sibson optimal')
-ax.fill_between(alpha_values, q05_opt, q95_opt, alpha=0.2, color='0.1')
+ax.plot(alpha_values, mean_elpd_opt, "-", color="0.1", lw=2.5, label="Sibson optimal")
+ax.fill_between(alpha_values, q05_opt, q95_opt, alpha=0.2, color="0.1")
 
-ax.plot(alpha_values, mean_elpd_unif, '-', color='0.5', lw=2.5, label='Uniform')
-ax.fill_between(alpha_values, q05_unif, q95_unif, alpha=0.2, color='0.5')
+ax.plot(alpha_values, mean_elpd_unif, "-", color="0.5", lw=2.5, label="Uniform")
+ax.fill_between(alpha_values, q05_unif, q95_unif, alpha=0.2, color="0.5")
 
-ax.axvline(1.0, color='gray', linestyle=':', lw=1.5, label='Nominal (α=1)')
+ax.axvline(1.0, color="gray", linestyle=":", lw=1.5, label="Nominal (α=1)")
 
-ax.set_xscale('log')
-ax.set_xlabel('α', fontsize=12)
-ax.set_ylabel('ELPD', fontsize=12)
+ax.set_xscale("log")
+ax.set_xlabel("α", fontsize=12)
+ax.set_ylabel("ELPD", fontsize=12)
 ax.legend(fontsize=10)
 ax.grid(alpha=0.3)
 

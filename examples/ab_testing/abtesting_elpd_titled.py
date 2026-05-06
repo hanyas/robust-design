@@ -1,7 +1,10 @@
 """
 Posterior Predictive Performance for Misspecified A/B Testing
 """
+
 from typing import NamedTuple
+
+import numpy as np
 
 import jax
 from jax import Array
@@ -26,6 +29,7 @@ class TiltedBinomial(NamedTuple):
         num_participants: Total participants (defines the support size)
         alpha: Tilting parameter.
     """
+
     num_participants: int
     alpha: float = 1.0
 
@@ -90,6 +94,11 @@ def custom_split(rng_key: Array, num_splits: int) -> Array:
     return keys[0], keys[1:]
 
 
+def build_alpha_grid() -> Array:
+    """Log-spaced robustness orders from 1e-2 to 1."""
+    return jnp.asarray(np.geomspace(1e-2, 1.0, 21), dtype=jnp.float64)
+
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -98,30 +107,20 @@ rng_key = jr.PRNGKey(42)
 
 # Experiment settings
 num_participants = 1000
-num_trials = int(5 * 1024)
+num_trials = 1024
 num_test_points = 32
 
 # Alpha values to evaluate
-decades = 10.0 ** jnp.arange(-2, 0)
-alpha_values = jnp.concatenate([jnp.arange(1, 11) * d for d in decades])
+alpha_values = build_alpha_grid()
 num_alphas = len(alpha_values)
 
 # True Process (Tilted Binomial)
 alpha_true = 1e-1
-proc_prior = Beta(
-    delta=jnp.array([1., 500.0]),
-    gamma=jnp.array([1.0, 500.0])
-)
-proc_lklhd = TiltedBinomial(
-    num_participants=num_participants,
-    alpha=alpha_true
-)
+proc_prior = Beta(delta=jnp.array([1.0, 500.0]), gamma=jnp.array([1.0, 500.0]))
+proc_lklhd = TiltedBinomial(num_participants=num_participants, alpha=alpha_true)
 
 # Model (Beta-Binomial)
-mdl_prior = Beta(
-    delta=jnp.array([1.0, 5.0]),
-    gamma=jnp.array([1.0, 5.0])
-)
+mdl_prior = Beta(delta=jnp.array([1.0, 5.0]), gamma=jnp.array([1.0, 5.0]))
 
 mdl_lklhd = Binomial(num_participants=num_participants)
 model = ABTesting(prior=mdl_prior, likelihood=mdl_lklhd)
@@ -176,12 +175,12 @@ def evaluate_all_alphas(
     """JIT-ted evaluation of all alphas to avoid per-trial recompilation."""
 
     def evaluate_alpha(alpha, design_opt, x_opt_val):
-        posterior_opt = model.get_tilted_posterior(x_opt_val, design_opt, alpha)
-        log_preds_opt = jax.vmap(
-            lambda d, x: model.get_posterior_predictive(posterior_opt, d, alpha=alpha).logpmf(x)
-        )(ds_test, xs_test)
+        posterior_opt = model.get_tilted_posterior(x_opt_val, design_opt, 1.0)
+        log_preds_opt = jax.vmap(lambda d, x: model.get_posterior_predictive(posterior_opt, d, alpha=alpha).logpmf(x))(
+            ds_test, xs_test
+        )
 
-        posterior_unif = model.get_tilted_posterior(x_unif, design_unif, alpha)
+        posterior_unif = model.get_tilted_posterior(x_unif, design_unif, 1.0)
         log_preds_unif = jax.vmap(
             lambda d, x: model.get_posterior_predictive(posterior_unif, d, alpha=alpha).logpmf(x)
         )(ds_test, xs_test)
@@ -206,9 +205,7 @@ for trial in range(num_trials):
 
     # Optimal designs: sample data for each α-specific design
     rng_key, sub_keys = custom_split(rng_key, num_alphas + 1)
-    x_optimal = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(
-        sub_keys, optimal_designs
-    )
+    x_optimal = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(sub_keys, optimal_designs)
 
     # Uniform design (single random allocation)
     rng_key, sub_key = jr.split(rng_key)
@@ -218,14 +215,10 @@ for trial in range(num_trials):
 
     # Test designs and observations
     rng_key, sub_keys = custom_split(rng_key, num_test_points + 1)
-    designs_test = jax.vmap(lambda k: generate_uniform_design(k, num_participants))(
-        sub_keys
-    )
+    designs_test = jax.vmap(lambda k: generate_uniform_design(k, num_participants))(sub_keys)
 
     rng_key, sub_keys = custom_split(rng_key, num_test_points + 1)
-    x_test = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(
-        sub_keys, designs_test
-    )
+    x_test = jax.vmap(lambda k, d: proc_lklhd.sample(k, d, theta_true))(sub_keys, designs_test)
 
     # Evaluate all alphas using the JIT-ted function
     elpds_opt, elpds_unif = evaluate_all_alphas(
@@ -260,7 +253,7 @@ se_elpd_unif = std_elpd_unif / jnp.sqrt(num_trials)
 
 print(f"\n{'α':>8} | {'Optimal (mean ± SE)':>20} | {'Uniform (mean ± SE)':>20}")
 print("-" * 55)
-for alpha_target in [0.01, 0.05, 0.1, 0.2, 0.5, 1.0]:
+for alpha_target in [0.01, 0.05, 0.1, 0.5, 1.0]:
     idx = jnp.argmin(jnp.abs(alpha_values - alpha_target))
     print(
         f"{alpha_values[idx]:>8.3f} | "
@@ -282,29 +275,33 @@ q95_unif = jnp.percentile(elpd_uniform, 95, axis=1)
 csv_path = "examples/ab_testing/data/abtesting_elpd.csv"
 with open(csv_path, "w", newline="") as csv_file:
     writer = csv.writer(csv_file)
-    writer.writerow([
-        "alpha",
-        "mean_opt",
-        "se_opt",
-        "q05_opt",
-        "q95_opt",
-        "mean_unif",
-        "se_unif",
-        "q05_unif",
-        "q95_unif",
-    ])
+    writer.writerow(
+        [
+            "alpha",
+            "mean_opt",
+            "se_opt",
+            "q05_opt",
+            "q95_opt",
+            "mean_unif",
+            "se_unif",
+            "q05_unif",
+            "q95_unif",
+        ]
+    )
     for idx in range(num_alphas):
-        writer.writerow([
-            float(alpha_values[idx]),
-            float(mean_elpd_opt[idx]),
-            float(se_elpd_opt[idx]),
-            float(q05_opt[idx]),
-            float(q95_opt[idx]),
-            float(mean_elpd_unif[idx]),
-            float(se_elpd_unif[idx]),
-            float(q05_unif[idx]),
-            float(q95_unif[idx]),
-        ])
+        writer.writerow(
+            [
+                float(alpha_values[idx]),
+                float(mean_elpd_opt[idx]),
+                float(se_elpd_opt[idx]),
+                float(q05_opt[idx]),
+                float(q95_opt[idx]),
+                float(mean_elpd_unif[idx]),
+                float(se_elpd_unif[idx]),
+                float(q05_unif[idx]),
+                float(q95_unif[idx]),
+            ]
+        )
 
 ax.plot(alpha_values, mean_elpd_opt, "-", color="0.1", lw=2.5, label="Optimal")
 ax.fill_between(alpha_values, q05_opt, q95_opt, alpha=0.2, color="0.1")

@@ -16,7 +16,7 @@ for an editable install.
 
 - **Robust Information Measures**: Implementation of Sibson's $\alpha$-Mutual Information and Rényi Information Gain.
 - **Policy Optimization**: PAC-Bayesian policy optimization using Relative Entropy Policy Search (REPS).
-- **Tractable Benchmarks**: Experimental design for conjugate linear regression and A/B testing 
+- **Tractable Benchmarks**: Experimental design for conjugate linear regression and A/B testing
 
 ## Examples
 

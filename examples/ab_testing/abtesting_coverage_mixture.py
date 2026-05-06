@@ -1,6 +1,7 @@
 """
-Posterior Calibration Assessment for Misspecified A/B Testing
+Posterior Calibration under Random Designs Across an α Sweep.
 """
+
 from typing import NamedTuple
 
 import jax
@@ -26,6 +27,7 @@ class BetaMixtureBinomial(NamedTuple):
     and then draw x ~ Binomial(n, p). The mean remains theta, while smaller
     kappa values induce stronger overdispersion and more extreme counts.
     """
+
     num_participants: int
     mixture_concentration: float = 10.0
 
@@ -89,18 +91,18 @@ if __name__ == "__main__":
     rng_key = jr.PRNGKey(42)
 
     # Experiment settings
-    num_participants = 1000
+    num_participants = 100
     num_trials = 10_000
 
-    # Models: Beta-Binomial
-    alpha_nominal = 1.0
-    alpha_robust = 1e-2
+    # α grid: quarter-decade from 10^{-5/4} to 10^0 (approx 0.056 -> 1)
+    alpha_values = 10.0 ** jnp.linspace(-1.25, 0.0, 5)
+    num_alphas = alpha_values.shape[0]
 
     # True Process (Beta-mixture Binomial)
-    mixture_concentration = 50.0
+    mixture_concentration = 10.0
     proc_prior = Beta(
-        delta=jnp.array([1.0, 500.0]),
-        gamma=jnp.array([1.0, 500.0]),
+        delta=jnp.array([100.0, 1.0]),
+        gamma=jnp.array([100.0, 1.0]),
     )
     proc_lklhd = BetaMixtureBinomial(
         num_participants=num_participants,
@@ -109,33 +111,22 @@ if __name__ == "__main__":
 
     # Model (Beta-Binomial)
     mdl_prior = Beta(
-        delta=jnp.array([1.0, 5.0]),
-        gamma=jnp.array([1.0, 5.0]),
+        delta=jnp.array([10.0, 1.0]),
+        gamma=jnp.array([10.0, 1.0]),
     )
 
     mdl_lklhd = Binomial(num_participants=num_participants)
     model = ABTesting(prior=mdl_prior, likelihood=mdl_lklhd)
 
-    # ============================================================================
-    # OPTIMAL DESIGNS
-    # ============================================================================
-    print("Finding optimal designs...")
-    design_opt_nominal = model.optimal_design_shannon()
-    design_opt_robust = model.optimal_design_sibson(alpha_robust)
-
-    print(f"Optimal n_A - Nominal, α={alpha_nominal:.1f}: {design_opt_nominal}")
-    print(f"Optimal n_A - Robust,  α={alpha_robust:.2f}: {design_opt_robust}")
-
     print("=" * 80)
-    print("COVERAGE COMPARISON: A/B TESTING")
+    print("COVERAGE SWEEP UNDER RANDOM DESIGNS: A/B TESTING")
     print("=" * 80)
     print("TRUE PROCESS: Beta-mixture Binomial")
     print(f"  Participants:           {num_participants}")
     print(f"  Mixture concentration:  {mixture_concentration:.1f}")
-    print("\nMODELS: Beta-Binomial")
-    print(f"  Nominal α={alpha_nominal:.1f}:    Bayes Posterior")
-    print(f"  Robust  α={alpha_robust:.2f}:    Robust Posterior")
-    print(f"\nNumber of trials:        {num_trials}")
+    print("\nMODEL: Beta-Binomial (uniform random designs only)")
+    print(f"  α values:        {[float(a) for a in alpha_values]}")
+    print(f"  Number of trials: {num_trials}")
     print("=" * 80)
 
     # ============================================================================
@@ -144,41 +135,30 @@ if __name__ == "__main__":
     print(f"\nRunning {num_trials} trials...")
 
     def run_single_trial(rng_key):
-        key_theta, key_design, key_obs_opt_nom, key_obs_opt_rob, key_obs_rand = jr.split(rng_key, 5)
+        """For one trial, return CDF values per α (shape (num_alphas, 2))."""
+        key_theta, key_design, key_obs = jr.split(rng_key, 3)
 
         # Sample true parameter from prior
         theta_true = proc_prior.sample(key_theta, 1)[0]
 
-        # --- Optimal Designs ---
-        x_opt_nom = proc_lklhd.sample(key_obs_opt_nom, design_opt_nominal, theta_true)
-        x_opt_rob = proc_lklhd.sample(key_obs_opt_rob, design_opt_robust, theta_true)
-
-        # --- Random Design ---
+        # Random design and observations (shared across α values)
         design_rand = generate_random_design(key_design, num_participants)
-        x_rand = proc_lklhd.sample(key_obs_rand, design_rand, theta_true)
+        x_rand = proc_lklhd.sample(key_obs, design_rand, theta_true)
 
-        # Compute tilted posteriors
-        post_opt_nom = model.get_tilted_posterior(x_opt_nom, design_opt_nominal, alpha_nominal)
-        post_opt_rob = model.get_tilted_posterior(x_opt_rob, design_opt_robust, alpha_robust)
-        post_rand_nom = model.get_tilted_posterior(x_rand, design_rand, alpha_nominal)
-        post_rand_rob = model.get_tilted_posterior(x_rand, design_rand, alpha_robust)
+        # Tilted posterior CDF for each α in the grid
+        def cdf_for_alpha(alpha):
+            posterior = model.get_tilted_posterior(x_rand, design_rand, alpha)
+            return compute_marginal_cdf(posterior, theta_true)
 
-        return jnp.array([
-            compute_marginal_cdf(post_opt_nom, theta_true),
-            compute_marginal_cdf(post_opt_rob, theta_true),
-            compute_marginal_cdf(post_rand_nom, theta_true),
-            compute_marginal_cdf(post_rand_rob, theta_true)
-        ])
+        return jax.vmap(cdf_for_alpha)(alpha_values)
 
     # Batch run all trials
     trial_keys = jr.split(rng_key, num_trials)
     results = jax.jit(jax.vmap(run_single_trial))(trial_keys)
+    # results shape: (num_trials, num_alphas, 2)
 
-    # Extract and flatten results for aggregate curves
-    cdf_opt_nominal = results[:, 0, :].flatten()
-    cdf_opt_robust = results[:, 1, :].flatten()
-    cdf_rand_nominal = results[:, 2, :].flatten()
-    cdf_rand_robust = results[:, 3, :].flatten()
+    # Flatten across trials and arms for each α
+    cdf_per_alpha = [results[:, i, :].flatten() for i in range(num_alphas)]
 
     # ============================================================================
     # COMPUTE METRICS
@@ -188,73 +168,29 @@ if __name__ == "__main__":
     print("=" * 80)
 
     expected_levels = jnp.linspace(0.05, 0.99, 25)
-
-    curve_opt_nom = compute_calibration_curve(cdf_opt_nominal, expected_levels)
-    curve_opt_rob = compute_calibration_curve(cdf_opt_robust, expected_levels)
-    curve_rand_nom = compute_calibration_curve(cdf_rand_nominal, expected_levels)
-    curve_rand_rob = compute_calibration_curve(cdf_rand_robust, expected_levels)
+    curves = [compute_calibration_curve(cdf, expected_levels) for cdf in cdf_per_alpha]
 
     csv_path = "examples/ab_testing/data/abtesting_coverage_mixture.csv"
     with open(csv_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow([
-            "expected_levels",
-            "curve_opt_nom",
-            "curve_opt_rob",
-            "curve_rand_nom",
-            "curve_rand_rob",
-        ])
-        for row in zip(
-            expected_levels.tolist(),
-            curve_opt_nom.tolist(),
-            curve_opt_rob.tolist(),
-            curve_rand_nom.tolist(),
-            curve_rand_rob.tolist(),
-        ):
+        header = ["expected_levels"] + [f"alpha_{float(a):.4f}" for a in alpha_values]
+        writer.writerow(header)
+        for level_idx, level in enumerate(expected_levels.tolist()):
+            row = [level] + [curves[i][level_idx].item() for i in range(num_alphas)]
             writer.writerow(row)
-
-    cov_95_opt_nom = compute_coverage_at_level(cdf_opt_nominal, 0.95)
-    cov_95_opt_rob = compute_coverage_at_level(cdf_opt_robust, 0.95)
-    cov_95_rand_nom = compute_coverage_at_level(cdf_rand_nominal, 0.95)
-    cov_95_rand_rob = compute_coverage_at_level(cdf_rand_robust, 0.95)
 
     # ============================================================================
     # RESULTS
     # ============================================================================
     print("\n" + "=" * 80)
-    print("RESULTS: 95% Credible Interval Coverage")
+    print("COVERAGE COMPARISON TABLE")
     print("=" * 80)
-
-    print("\nOPTIMIZED DESIGN (Aggregate)")
-    print("-" * 30)
-    print(f"  Nominal (α={alpha_nominal:.1f}):     {100 * cov_95_opt_nom:.1f}%")
-    print(f"  Robust  (α={alpha_robust:.2f}):     {100 * cov_95_opt_rob:.1f}%")
-
-    print("\nRANDOM DESIGN (Aggregate)")
-    print("-" * 30)
-    print(f"  Nominal (α={alpha_nominal:.1f}):     {100 * cov_95_rand_nom:.1f}%")
-    print(f"  Robust  (α={alpha_robust:.2f}):     {100 * cov_95_rand_rob:.1f}%")
-
-    # ============================================================================
-    # COMPARISON TABLE
-    # ============================================================================
     table_levels = jnp.array([0.25, 0.50, 0.75, 0.95])
-    print("\nCOVERAGE COMPARISON TABLE")
+    print(f"{'α':>8} | " + " | ".join([f"{100 * l:7.0f}%" for l in table_levels]))
     print("-" * 73)
-    print(f"{'Design':<16} | " + " | ".join([f"{100 * l:7.0f}%" for l in table_levels]))
-    print("-" * 73)
-
-    rob_opt_covs = [compute_coverage_at_level(cdf_opt_robust, l) for l in table_levels]
-    rob_rand_covs = [compute_coverage_at_level(cdf_rand_robust, l) for l in table_levels]
-    nom_opt_covs = [compute_coverage_at_level(cdf_opt_nominal, l) for l in table_levels]
-    nom_rand_covs = [compute_coverage_at_level(cdf_rand_nominal, l) for l in table_levels]
-
-    print(f"{'Robust + Optimal':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in rob_opt_covs]))
-    print(f"{'Robust + Uniform':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in rob_rand_covs]))
-    print("-" * 73)
-    print(f"{'Nominal + Optimal':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in nom_opt_covs]))
-    print(f"{'Nominal + Uniform':<16} | " + " | ".join([f"{100 * c:7.1f}%" for c in nom_rand_covs]))
-    print("-" * 73)
+    for i, alpha in enumerate(alpha_values):
+        covs = [compute_coverage_at_level(cdf_per_alpha[i], l) for l in table_levels]
+        print(f"{float(alpha):>8.4f} | " + " | ".join([f"{100 * c:7.1f}%" for c in covs]))
 
     # ============================================================================
     # VISUALIZATION
@@ -262,15 +198,23 @@ if __name__ == "__main__":
     print("\nVISUALIZATION")
     fig, ax = plt.subplots(1, 1, figsize=(8, 6))
 
-    ax.plot([0, 1], [0, 1], ':', color='0.2', lw=2, label='Perfect')
-    ax.plot(expected_levels, curve_opt_nom, '--', color='0.1', lw=2.5, label=f'Nominal w/ Optimal (α={alpha_nominal:.1f})')
-    ax.plot(expected_levels, curve_opt_rob, '-', color='0.1', lw=2.5, label=f'Robust w/ Optimal (α={alpha_robust:.2f})')
-    ax.plot(expected_levels, curve_rand_nom, '--', color='0.5', lw=2.5, label=f'Nominal w/ Uniform (α={alpha_nominal:.1f})')
-    ax.plot(expected_levels, curve_rand_rob, '-', color='0.5', lw=2.5, label=f'Robust w/ Uniform (α={alpha_robust:.2f})')
+    ax.plot([0, 1], [0, 1], ":", color="0.2", lw=2, label="Perfect")
 
-    ax.set_xlabel('Expected Coverage', fontsize=12)
-    ax.set_ylabel('Actual Coverage', fontsize=12)
-    ax.legend(fontsize=10, loc='lower right')
+    # Grayscale: small α (dark) -> large α (light)
+    for i, alpha in enumerate(alpha_values):
+        shade = 0.10 + 0.65 * (i / max(num_alphas - 1, 1))
+        ax.plot(
+            expected_levels,
+            curves[i],
+            "-",
+            color=str(shade),
+            lw=2.5,
+            label=f"α = {float(alpha):.3f}",
+        )
+
+    ax.set_xlabel("Expected Coverage", fontsize=12)
+    ax.set_ylabel("Actual Coverage", fontsize=12)
+    ax.legend(fontsize=10, loc="lower right")
     ax.set_xlim([0, 1])
     ax.set_ylim([0, 1])
     ax.grid(True, alpha=0.3)
