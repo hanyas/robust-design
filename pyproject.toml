@@ -19,7 +19,6 @@ dependencies = [
     "jaxopt",
     "optax",
     "flax",
-    "brax",
     "distrax",
     "matplotlib",
 ]
