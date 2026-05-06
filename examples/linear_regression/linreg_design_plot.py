@@ -75,7 +75,7 @@ for alpha in alphas:
 mi_matrix = np.array(mi_results)  # (num_alphas, num_points)
 
 # Write plotted data to CSV
-csv_path = "examples/linear_regression/data/linreg_design.csv"
+csv_path = "examples/linear_regression/data/linreg_design_plot.csv"
 with open(csv_path, "w", newline="") as csvfile:
     writer = csv.writer(csvfile)
     header = ["xi_1", "xi_2"]
