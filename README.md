@@ -2,8 +2,6 @@
 
 A JAX implementation of robust Bayesian experimental design under model misspecification. This repository accompanies the NeurIPS 2026 paper [Maximin Robust Bayesian Experimental Design](https://arxiv.org/abs/2603.14094).
 
-The experimenter and an adversarial nature play a max–min game in which nature perturbs the data-generating process within a Kullback–Leibler neighborhood of the nominal model. The resulting robust objective is Sibson's $\alpha$-mutual information, the robust belief update is the $\alpha$-tilted posterior, and the conditional information gain is a Rényi divergence. Since Sibson's $\alpha$-mutual information must in general be estimated with a biased and noisy nested Monte Carlo estimator, designs are selected by optimizing a PAC-Bayes lower bound over stochastic design policies.
-
 ## Installation
 
 Install [JAX](https://github.com/jax-ml/jax?tab=readme-ov-file#installation) for your hardware, then run from the repository root:
@@ -12,7 +10,7 @@ Install [JAX](https://github.com/jax-ml/jax?tab=readme-ov-file#installation) for
 pip install -e .
 ```
 
-## Package Overview
+## Overview
 
 The `rdesign` package provides:
 
@@ -27,11 +25,7 @@ The `examples` directory reproduces the numerical evaluation of the paper on two
 - `examples/linear_regression`: a continuous regression design problem evaluated under Student-t misspecification, with a ten-dimensional variant for design optimization.
 - `examples/ab_testing`: a discrete allocation problem between two variants evaluated under a Beta-mixture Binomial process.
 
-For each problem there are scripts that plot the robust information surface across $\alpha$, evaluate the realized information gain, posterior error, and credible-interval coverage under misspecification, and compare naive optimization of the Monte Carlo estimator against PAC-Bayes policies. Each script writes its results as a CSV file to the `data` folder next to it. Run them from the repository root, for example:
-
-```bash
-python examples/linear_regression/linreg_design_plot.py
-```
+For each problem there are scripts that plot the robust information surface across $\alpha$, evaluate the realized information gain, posterior error, and credible-interval coverage under misspecification, and compare naive optimization of the Monte Carlo estimator against PAC-Bayes policies.
 
 ## Citation
 
