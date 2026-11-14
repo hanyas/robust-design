@@ -2,6 +2,7 @@
 .idea/
 .vscode/
 .history/
+.codex/
 
 ## Core latex/pdflatex auxiliary files:
 *.aux

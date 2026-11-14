@@ -9,33 +9,33 @@ from optax import GradientTransformation
 
 class Distribution(Protocol):
     """Base protocol for all distributions.
-    
+
     Uses structural typing - any class with these methods satisfies the protocol.
     """
-    
+
     def sample(self, key: Array, num_samples: int) -> Array:
         """Sample from the distribution.
-        
+
         Args:
             key: Random key
             num_samples: Number of samples to draw
-            
+
         Returns:
             Samples of shape (num_samples, dim)
         """
         ...
-    
+
     def logpdf(self, value: Array) -> Array:
         """Compute log probability density.
-        
+
         Args:
             value: Value(s) to evaluate, shape (dim,) or (n, dim)
-            
+
         Returns:
             Log probability, scalar or shape (n,)
         """
         ...
-    
+
     @property
     def dim(self) -> int:
         """Dimension of the distribution."""
@@ -44,40 +44,41 @@ class Distribution(Protocol):
 
 class Prior(Distribution, Protocol):
     """Prior distribution p(θ) over parameters.
-    
+
     Extends Distribution with no additional requirements.
     Any Distribution can serve as a Prior.
     """
+
     pass
 
 
 class Likelihood(Protocol):
     """Likelihood model p(x | θ, ξ).
-    
+
     Maps parameters θ and designs ξ to observation distributions.
     """
-    
+
     def sample(self, key: Array, design: Array, theta: Array) -> Array:
         """Sample observations given parameters and design.
-        
+
         Args:
             key: Random key
             design: Design points ξ
             theta: Parameters θ
-            
+
         Returns:
             Observations x
         """
         ...
-    
+
     def logpdf(self, x: Array, design: Array, theta: Array) -> Array:
         """Compute log likelihood p(x | θ, ξ).
-        
+
         Args:
             x: Observations
             design: Design points ξ
             theta: Parameters θ
-            
+
         Returns:
             Log likelihood
         """
@@ -125,34 +126,29 @@ class Policy(ABC):
         )
 
 
-class SigmaPoints(NamedTuple):
-    """Sigma points for quadrature"""
-    points: Array  # (n_points, dim)
-    wm: Array      # weights for mean (n_points,)
-    wc: Array      # weights for covariance (n_points,)
-    xi: Array      # untransformed points (dim, n_points)
-
-
 @dataclass
 class REPSConfig:
     """Configuration for REPS optimization.
 
     Args:
-        num_samples: Number of samples per iteration for Monte Carlo estimation.
-        batch_size: Mini-batch size for stochastic gradient updates.
-        max_iterations: Total number of mirror descent iterations.
+        num_samples: Number of samples per iteration.
+        batch_size: Mini-batch size for updates.
+        max_iterations: Total number of iterations.
         log_interval: Iterations between progress logs.
         verbose: Whether to print progress.
     """
+
     num_samples: int = 100
     batch_size: int = 16
     max_iterations: int = 1000
     log_interval: int = 100
     verbose: bool = True
+    lmbda: float = 1.0
 
 
 class StepInfo(NamedTuple):
     """Information from a single optimization step."""
+
     mean_value: Array
     entropy: Array
     temperature: float
@@ -160,5 +156,6 @@ class StepInfo(NamedTuple):
 
 class OptimizationResult(NamedTuple):
     """Result of policy optimization."""
-    policy_state: TrainState
+
+    state: TrainState
     history: dict[str, list]

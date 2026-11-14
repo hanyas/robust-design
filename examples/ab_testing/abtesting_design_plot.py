@@ -1,8 +1,5 @@
 """
 Sibson's Mutual Information Analysis for A/B Testing
-
-This script visualizes how the optimal experimental design (allocation of
-participants between groups A and B) changes as the robustness parameter α varies.
 """
 
 import jax
@@ -91,7 +88,7 @@ for i, alpha in enumerate(alpha_values):
         edgecolor="none",
     )
 
-    # Minimal styling - clean academic look
+    # Minimal styling
     ax.set_xlabel("$n_A$", fontsize=11)
     ax.set_ylabel("$I^S_{\\alpha}$", fontsize=11)
     ax.set_title(f"$\\alpha = {alpha:.2f}$", fontsize=11, pad=8)
