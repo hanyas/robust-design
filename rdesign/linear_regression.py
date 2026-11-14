@@ -81,23 +81,6 @@ class LinearGaussian(NamedTuple):
         num_observations = H.shape[0]
         return -0.5 * (jnp.sum(residual**2, axis=-1) / sigma2 + num_observations * jnp.log(2.0 * jnp.pi * sigma2))
 
-    def logpdf_and_grad_batch(
-        self,
-        x: Array,
-        design: Array,
-        theta: Array,
-    ) -> tuple[Array, Array]:
-        """
-        Compute batched log likelihoods and gradients with respect to theta.
-        """
-        H = self.design_matrix(design)
-        sigma2 = self.noise_stddev**2
-        mean = jnp.einsum("...d,nd->...n", theta, H)
-        residual = jnp.broadcast_to(x, mean.shape) - mean
-        logpdf = -0.5 * (jnp.sum(residual**2, axis=-1) / sigma2 + H.shape[0] * jnp.log(2.0 * jnp.pi * sigma2))
-        grad = jnp.einsum("nd,...n->...d", H, residual) / sigma2
-        return logpdf, grad
-
     def mean(self, design: Array, theta: Array) -> Array:
         """
         Compute the mean of p(x | θ, ξ) = H(ξ)θ.
@@ -124,14 +107,6 @@ class LinearGaussian(NamedTuple):
         """
         num_observations = self.design_matrix(design).shape[0]
         return self.noise_stddev**2 * jnp.eye(num_observations)
-
-    def power_upper_bound(self, design: Array, alpha: float, x: Array | None = None) -> Array:
-        """
-        Upper bound M(x) >= sup_theta p(x | theta, xi)^alpha for the Gaussian likelihood.
-        """
-        num_observations = self.design_matrix(design).shape[0]
-        log_peak_density = -0.5 * num_observations * jnp.log(2.0 * jnp.pi * self.noise_stddev**2)
-        return jnp.exp(alpha * log_peak_density)
 
 
 class LinearRegression(NamedTuple):
@@ -309,7 +284,7 @@ class LinearRegression(NamedTuple):
             Shannon's mutual information in nats.
         """
         num_observations = self.likelihood.design_matrix(design).shape[0]
-        predictive = self.get_prior_predictive(design)
+        predictive = self.get_marginal(design)
         log_det_pred = jnp.linalg.slogdet(predictive.cov)[1]
         log_det_noise = num_observations * jnp.log(self.likelihood.noise_stddev**2)
 

@@ -7,7 +7,6 @@ from jax import Array
 import jax.numpy as jnp
 import jax.random as jr
 
-from jax.scipy.special import ndtri
 from jax.scipy.stats import multivariate_normal
 from jax.scipy.stats import norm
 from jax.scipy.special import betaln, gammaln, digamma, logsumexp
@@ -55,22 +54,6 @@ class Gaussian(NamedTuple):
         _, logdet = jnp.linalg.slogdet(self.cov)
         return -0.5 * (mahal + self.dim * jnp.log(2.0 * jnp.pi) + logdet)
 
-    def logpdf_and_grad_batch(self, value: Array) -> tuple[Array, Array]:
-        """Compute log density and gradient for a batch of values."""
-        diff = value - self.mean
-        precision = self.precision()
-        logpdf = self.logpdf_batch(value)
-        grad = -jnp.einsum("ij,...j->...i", precision, diff)
-        return logpdf, grad
-
-    def marginal_quantiles(self, levels: Array) -> Array:
-        """
-        Coordinatewise Gaussian quantiles, shape ``(dim, num_levels)``.
-        """
-        levels = jnp.asarray(levels, dtype=self.mean.dtype).reshape(-1)
-        stddev = jnp.sqrt(jnp.maximum(jnp.diag(self.cov), 1e-12))
-        return self.mean[:, None] + stddev[:, None] * ndtri(levels)[None, :]
-
     def marginal_cdf(self, value: Array) -> Array:
         """Coordinatewise Gaussian CDF values."""
         value = jnp.atleast_1d(jnp.asarray(value, dtype=self.mean.dtype)).reshape(-1)
@@ -78,17 +61,6 @@ class Gaussian(NamedTuple):
             raise ValueError("Gaussian.marginal_cdf expects one value per coordinate.")
         stddev = jnp.sqrt(jnp.maximum(jnp.diag(self.cov), 1e-12))
         return norm.cdf(value, loc=self.mean, scale=stddev)
-
-    def marginal_crps(self, value: Array) -> Array:
-        """Coordinatewise Gaussian CRPS values."""
-        value = jnp.atleast_1d(jnp.asarray(value, dtype=self.mean.dtype)).reshape(-1)
-        if value.size != self.dim:
-            raise ValueError("Gaussian.marginal_crps expects one value per coordinate.")
-        stddev = jnp.sqrt(jnp.maximum(jnp.diag(self.cov), 1e-12))
-        z = (value - self.mean) / stddev
-        phi = jnp.exp(norm.logpdf(z))
-        Phi = norm.cdf(z)
-        return stddev * (z * (2.0 * Phi - 1.0) + 2.0 * phi - 1.0 / jnp.sqrt(jnp.pi))
 
     @property
     def dim(self) -> int:

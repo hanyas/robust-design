@@ -80,34 +80,6 @@ class BetaBinomial(NamedTuple):
             cdfs.append(jnp.sum(jnp.where(grid <= jnp.floor(x_i), pmf, 0.0)))
         return jnp.stack(cdfs)
 
-    def marginal_quantiles(self, levels: Array) -> Array:
-        """Coordinatewise Beta-Binomial quantiles."""
-        levels = jnp.asarray(levels, dtype=self.trials.dtype).reshape(-1)
-        quantiles = []
-        for n_i, d_i, g_i in zip(self.trials, self.delta, self.gamma):
-            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
-            cdf = jnp.cumsum(pmf)
-            indices = jnp.searchsorted(cdf, levels, side="left")
-            indices = jnp.clip(indices, 0, grid.size - 1)
-            quantiles.append(grid[indices])
-        return jnp.stack(quantiles)
-
-    def marginal_crps(self, x: Array) -> Array:
-        """Coordinatewise Beta-Binomial CRPS values."""
-        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.trials.dtype)).reshape(-1)
-        if x.size != self.trials.size:
-            raise ValueError("marginal_crps expects one value per group.")
-
-        crps = []
-        for x_i, n_i, d_i, g_i in zip(x, self.trials, self.delta, self.gamma):
-            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
-            pairwise = jnp.abs(grid[:, None] - grid[None, :])
-            first_term = jnp.sum(pmf * jnp.abs(grid - x_i))
-            second_term = 0.5 * jnp.sum(pmf[:, None] * pmf[None, :] * pairwise)
-            crps.append(first_term - second_term)
-        return jnp.stack(crps)
-
-
 class TiltedBetaBinomial(NamedTuple):
     """
     α-tilted Marginal distribution p_α(x | ξ).
@@ -231,34 +203,6 @@ class TiltedBetaBinomial(NamedTuple):
             grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
             cdfs.append(jnp.sum(jnp.where(grid <= jnp.floor(x_i), pmf, 0.0)))
         return jnp.stack(cdfs)
-
-    def marginal_quantiles(self, levels: Array) -> Array:
-        """Coordinatewise tilted Beta-Binomial quantiles."""
-        levels = jnp.asarray(levels, dtype=self.trials.dtype).reshape(-1)
-        quantiles = []
-        for n_i, d_i, g_i in zip(self.trials, self.delta, self.gamma):
-            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
-            cdf = jnp.cumsum(pmf)
-            indices = jnp.searchsorted(cdf, levels, side="left")
-            indices = jnp.clip(indices, 0, grid.size - 1)
-            quantiles.append(grid[indices])
-        return jnp.stack(quantiles)
-
-    def marginal_crps(self, x: Array) -> Array:
-        """Coordinatewise tilted Beta-Binomial CRPS values."""
-        x = jnp.atleast_1d(jnp.asarray(x, dtype=self.trials.dtype)).reshape(-1)
-        if x.size != self.trials.size:
-            raise ValueError("marginal_crps expects one value per group.")
-
-        crps = []
-        for x_i, n_i, d_i, g_i in zip(x, self.trials, self.delta, self.gamma):
-            grid, pmf = self._group_pmf_grid(n_i, d_i, g_i)
-            pairwise = jnp.abs(grid[:, None] - grid[None, :])
-            first_term = jnp.sum(pmf * jnp.abs(grid - x_i))
-            second_term = 0.5 * jnp.sum(pmf[:, None] * pmf[None, :] * pairwise)
-            crps.append(first_term - second_term)
-        return jnp.stack(crps)
-
 
 class Binomial(NamedTuple):
     """

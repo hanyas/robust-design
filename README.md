@@ -1,49 +1,51 @@
-# Robust Bayesian Experimental Design
+# Maximin Robust Bayesian Experimental Design
 
-Implementation of robust Bayesian experimental design methods based on Sibson's $\alpha$-mutual information.
+A JAX implementation of robust Bayesian experimental design under model misspecification. This repository accompanies the NeurIPS 2026 paper [Maximin Robust Bayesian Experimental Design](https://arxiv.org/abs/2603.14094).
+
+The experimenter and an adversarial nature play a max–min game in which nature perturbs the data-generating process within a Kullback–Leibler neighborhood of the nominal model. The resulting robust objective is Sibson's $\alpha$-mutual information, the robust belief update is the $\alpha$-tilted posterior, and the conditional information gain is a Rényi divergence. Since Sibson's $\alpha$-mutual information must in general be estimated with a biased and noisy nested Monte Carlo estimator, designs are selected by optimizing a PAC-Bayes lower bound over stochastic design policies.
 
 ## Installation
 
-Install [JAX](https://github.com/jax-ml/jax?tab=readme-ov-file#installation) for your available hardware. Then run:
+Install [JAX](https://github.com/jax-ml/jax?tab=readme-ov-file#installation) for your hardware, then run from the repository root:
 
 ```bash
 pip install -e .
 ```
 
-for an editable install.
+## Package Overview
 
-## Features
+The `rdesign` package provides:
 
-- **Robust Information Measures**: Implementation of Sibson's $\alpha$-Mutual Information and Rényi Information Gain.
-- **Policy Optimization**: PAC-Bayesian policy optimization using Relative Entropy Policy Search (REPS).
-- **Tractable Benchmarks**: Experimental design for conjugate linear regression and A/B testing
+- **Conjugate benchmark models** with closed-form robust quantities: linear-Gaussian regression (`rdesign/linear_regression.py`) and Beta-Binomial A/B testing (`rdesign/ab_testing.py`). Both expose the Bayes and $\alpha$-tilted posteriors, the $\alpha$-tilted marginal, Sibson's $\alpha$-mutual information, the Rényi information gain, and the power-likelihood Gibbs expected information gain used for comparison.
+- **Nested Monte Carlo estimation** of Sibson's $\alpha$-mutual information in the log domain (`rdesign/utils.py`), with and without access to the marginal likelihood.
+- **PAC-Bayesian design policies** (`rdesign/policy.py`) fitted with relative entropy policy search (`rdesign/reps.py`): a Gaussian policy with a tanh bijector for box-constrained continuous designs, and a categorical policy for discrete designs.
 
 ## Examples
 
-We provide several experiments to demonstrate the behavior of robust designs:
+The `examples` directory reproduces the numerical evaluation of the paper on two benchmark problems:
 
-### Linear Regression
-Located in `examples/linear_regression/`:
-- `linreg_design_plot.py`: Visualize the information surfaces for different values of $\alpha$.
-- `linreg_gain_studentt.py`: Evaluate the information gain under Student-t misspecification.
-- `linreg_mse_studentt.py`: Evaluate the posterior mean MSE under Student-t misspecification.
-- `linreg_coverage_studentt.py`: Analyze credible-interval coverage under Student-t misspecification.
-- `linreg_opt_comp.py`: Compare stochastic policy optimization to gradient descent.
-- `linreg_opt_sweep_alpha.py`: Sweep over $\alpha$ comparing GD and REPS.
-- `linreg_opt_sweep_lambda.py`: Sensitivity sweep over the PAC-Bayes precision $\lambda$.
-- `linreg_opt_sweep_samples.py`: Sweep over sample sizes comparing GD and REPS.
+- `examples/linear_regression`: a continuous regression design problem evaluated under Student-t misspecification, with a ten-dimensional variant for design optimization.
+- `examples/ab_testing`: a discrete allocation problem between two variants evaluated under a Beta-mixture Binomial process.
 
-### A/B Testing
-Located in `examples/ab_testing/`:
-- `abtesting_design_plot.py`: Visualize the information surfaces for different values of $\alpha$.
-- `abtesting_gain_mixture.py`: Evaluate the information gain under a Beta-mixture Binomial likelihood.
-- `abtesting_mse_mixture.py`: Evaluate the posterior mean MSE under a Beta-mixture Binomial likelihood.
-- `abtesting_mse_mixture_geig.py`: Same as above using the generalized eigenvalue formulation.
-- `abtesting_coverage_mixture.py`: Analyze credible-interval coverage under a Beta-mixture Binomial likelihood.
-- `abtesting_opt_comp.py`: Compare stochastic policy optimization to exhaustive enumeration.
+For each problem there are scripts that plot the robust information surface across $\alpha$, evaluate the realized information gain, posterior error, and credible-interval coverage under misspecification, and compare naive optimization of the Monte Carlo estimator against PAC-Bayes policies. Each script writes its results as a CSV file to the `data` folder next to it. Run them from the repository root, for example:
 
-
-To run an example, use:
 ```bash
-python examples/ab_testing/abtesting_design_plot.py
+python examples/linear_regression/linreg_design_plot.py
 ```
+
+## Citation
+
+If you use this code, please cite the paper:
+
+```bibtex
+@inproceedings{abdulsamad2026maximin,
+  title     = {Maximin Robust {B}ayesian Experimental Design},
+  author    = {Abdulsamad, Hany and Iqbal, Sahel and Naesseth, Christian A. and Matsubara, Takuo and Corenflos, Adrien},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2026}
+}
+```
+
+## License
+
+This project is released under the MIT License. See [LICENSE](LICENSE) for details.

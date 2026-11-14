@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Protocol, NamedTuple
+from typing import Protocol, NamedTuple
 
 from jax import Array
 from flax.training.train_state import TrainState
@@ -70,64 +70,6 @@ class Likelihood(Protocol):
             Observations x
         """
         ...
-
-
-class ProposalKernel(NamedTuple):
-    """Generic Metropolis-Hastings proposal kernel."""
-
-    sample: Callable[[Array, Array], Array]
-    log_prob: Callable[[Array, Array], Array]
-
-
-class IntegerLadderMCMCConfig(NamedTuple):
-    """Configuration for the generic integer-ladder MCMC sampler."""
-
-    num_warmup_steps: int = 250
-    num_retained_samples: int = 8
-    thinning: int = 1
-    compute_ess: bool = True
-
-
-class IntegerLadderMCMCResult(NamedTuple):
-    """Output of the generic integer-ladder MCMC sampler."""
-
-    x: Array
-    x_by_chain: Array
-    theta_copies: Array
-    theta_copies_by_chain: Array
-    x_acceptance_rate: Array
-    theta_acceptance_rate: Array
-    ess_x: Array
-    ess_theta: Array
-
-
-class RussianRouletteMCMCConfig(NamedTuple):
-    """Configuration for the generic Russian-roulette pseudo-marginal sampler."""
-
-    num_warmup_steps: int = 500
-    num_retained_samples: int = 16
-    thinning: int = 1
-    rr_chunk_size: int = 16
-    compute_ess: bool = True
-
-
-class RussianRouletteMCMCResult(NamedTuple):
-    """Output of the generic Russian-roulette pseudo-marginal sampler."""
-
-    x: Array
-    x_by_chain: Array
-    t: Array
-    t_by_chain: Array
-    theta_copies: Array
-    theta_copies_by_chain: Array
-    rr_counts: Array
-    rr_counts_by_chain: Array
-    x_acceptance_rate: Array
-    t_acceptance_rate: Array
-    theta_acceptance_rate: Array
-    ess_x: Array
-    ess_t: Array
-    ess_theta: Array
 
     def logpdf(self, x: Array, design: Array, theta: Array) -> Array:
         """Compute log likelihood p(x | θ, ξ).
